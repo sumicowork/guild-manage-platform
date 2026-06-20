@@ -48,15 +48,18 @@ export async function GET(
     const mapped = {
       ...camel,
       likeCount: camel.preferCount ?? 0,
+      createdAt: camel.createTime ?? camel.createdAt,
       channelId: '',
       comments: (camel.comments || []).map((c: any) => ({
         ...c,
         content: c.contentText || '',
         likeCount: c.likeCount ?? 0,
+        createdAt: c.createTime ?? c.createdAt,
         replies: (c.replies || []).map((r: any) => ({
           ...r,
           content: r.contentText || '',
           likeCount: r.likeCount ?? 0,
+          createdAt: r.createTime ?? r.createdAt,
         })),
       })),
     };

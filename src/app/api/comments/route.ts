@@ -65,6 +65,7 @@ export async function GET(req: NextRequest) {
       content: c.contentText || '',
       feedTitle: c.feed?.title ?? '',
       likeCount: c.likeCount ?? 0,
+      createdAt: c.createTime ?? c.createdAt,
     }));
     return success(mapped, {
       page,

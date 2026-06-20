@@ -93,6 +93,7 @@ export async function GET(req: NextRequest) {
         ...rest,
         likeCount: preferCount ?? 0,
         commentCount: f.commentCount ?? 0,
+        createdAt: f.createTime ?? f.createdAt,
         channelId: '',
       };
     });
