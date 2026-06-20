@@ -23,31 +23,30 @@ function run(cmd, opts = {}) {
 }
 
 function checkDbHasData() {
-  // 通过 psql 直接查询数据库是否已有数据
-  // 不依赖 Prisma Client 的 import 路径问题
+  // 方法1：psql 直查
   try {
-    // 方法1：如果安装了 psql
     const out = run(
       `psql "${PG_URL}" -c "SELECT COUNT(*) FROM feeds" -t -A 2>/dev/null || echo "-1"`,
       { timeout: 10000 }
     );
     const n = parseInt(out.trim(), 10);
-    return isNaN(n) ? null : n;
+    if (n >= 0) return n;
+  } catch {}
+  // 方法2：node -e 用 @prisma/client
+  try {
+    const out = run(
+      `node -e "
+      const { PrismaClient } = require('@prisma/client');
+      new PrismaClient().feed.count().then(c => { console.log(c); process.exit(0); }).catch(() => process.exit(1));
+      " 2>/dev/null && echo "OK" || echo "FAIL"`,
+      { timeout: 15000 }
+    );
+    const trimmed = out.trim();
+    if (!trimmed.endsWith("OK")) return null;
+    const num = parseInt(trimmed.replace("OK","").trim(), 10);
+    return isNaN(num) ? null : num;
   } catch {
-    try {
-      // 方法2：通过 node -e 执行 Prisma（纯字符串，无 require 路径问题）
-      const out = run(
-        `node -e "
-        const { PrismaClient } = require('@prisma/client');
-        new PrismaClient().feed.count().then(c => { console.log(c); process.exit(0); }).catch(() => process.exit(1));
-        " 2>/dev/null || echo "-2"`,
-        { timeout: 15000 }
-      );
-      const n = parseInt(out.trim(), 10);
-      return isNaN(n) ? null : n;
-    } catch {
-      return null;
-    }
+    return null;
   }
 }
 
@@ -76,15 +75,20 @@ async function main() {
   log("[2/4] 检查数据状态...");
   const count = checkDbHasData();
 
-  if (count === null) {
-    log("  ⚠ 无法查询数据库，跳过数据导入");
-  } else if (count === 0) {
-    log("  → 数据库为空");
+  // 只有明确查到有数据才跳过导入
+  if (count !== null && count > 0) {
+    log(`  → 数据库已有 ${count} 条帖子记录，跳过导入`);
+  } else {
+    if (count === null) {
+      log("  ⚠ 无法查询数据库，尝试直接导入...");
+    } else {
+      log("  → 数据库为空");
+    }
     const jsonDir = process.env.JSON_DATA_DIR || path.join(ROOT, "output");
     const mainJson = path.join(jsonDir, "82203161765285899_20260528_151950.json");
 
     if (fs.existsSync(mainJson)) {
-      log("[3/4] 从 JSON 导入历史数据...");
+      log("  → 从 JSON 导入历史数据...");
       // 确保 output/ 目录存在并包含所有 JSON
       const outDir = path.join(ROOT, "output");
       if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
@@ -111,8 +115,6 @@ async function main() {
       log("  → 未找到 JSON 文件（期待路径: " + mainJson + "）");
       log("  → 跳过导入");
     }
-  } else {
-    log(`  → 数据库已有 ${count} 条帖子记录，跳过导入`);
   }
 
   // ─── 3. 确保构建存在 ───
