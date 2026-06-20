@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
-    const size = Math.min(100, Math.max(1, parseInt(searchParams.get("size") || "20", 10)));
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "20", 10)));
     const search = searchParams.get("search")?.trim() || undefined;
     const status = searchParams.get("status") || "active";
     const feedId = searchParams.get("feedId")?.trim() || undefined;
@@ -44,8 +44,8 @@ export async function GET(req: NextRequest) {
       prisma.comment.findMany({
         where,
         orderBy: { create_time: "desc" },
-        skip: (page - 1) * size,
-        take: size,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
         include: {
           feed: {
             select: {
@@ -59,12 +59,10 @@ export async function GET(req: NextRequest) {
     ]);
 
     return success(serializeBigInt(comments), {
-      meta: {
-        page,
-        size,
-        total,
-        totalPages: Math.ceil(total / size),
-      },
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize),
     });
   } catch (err) {
     console.error("Comments list error:", err);

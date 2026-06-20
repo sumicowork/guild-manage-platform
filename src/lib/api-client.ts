@@ -42,6 +42,12 @@ class ApiClient {
 
     // 解包服务端 success() 的 { success: true, data: ... } 包装
     if (json && json.success === true && 'data' in json) {
+      // 数组 data（分页响应）：保留结构，仅移除 success 字段
+      if (Array.isArray(json.data)) {
+        const { success, ...rest } = json;
+        return rest as T;
+      }
+      // 对象 data（单个实体）：直接解包
       return json.data as T;
     }
 
