@@ -107,6 +107,7 @@ async function main() {
         run("npx tsx scripts/migrate-data.ts", {
           stdio: "inherit",
           timeout: 600000, // 10min
+          env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL },
         });
         log("  ✓ 历史数据导入完成");
       } catch (e) {
