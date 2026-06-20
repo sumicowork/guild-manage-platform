@@ -9,24 +9,22 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
-    const size = Math.min(100, Math.max(1, parseInt(searchParams.get("size") || "20", 10)));
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "20", 10)));
 
     const [tasks, total] = await Promise.all([
       prisma.crawlTask.findMany({
         orderBy: { created_at: "desc" },
-        skip: (page - 1) * size,
-        take: size,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
       }),
       prisma.crawlTask.count(),
     ]);
 
     return success(serializeBigInt(tasks), {
-      meta: {
-        page,
-        size,
-        total,
-        totalPages: Math.ceil(total / size),
-      },
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize),
     });
   } catch (err) {
     console.error("Crawl tasks list error:", err);
