@@ -11,6 +11,9 @@ const path = require("path");
 const fs = require("fs");
 const { Pool } = require("pg");
 
+// 加载 .env 文件（如果有）
+try { require("dotenv").config(); } catch {}
+
 const ROOT = __dirname;
 const PG_URL = process.env.DATABASE_URL || "";
 
@@ -71,6 +74,12 @@ async function main() {
   log("================================================");
   log("  频道管理平台 — 容器启动入口");
   log("================================================");
+
+  // 打印数据库地址（隐藏密码）
+  const dbUrlShort = PG_URL
+    ? PG_URL.replace(/\/\/[^:]+:[^@]+@/, "//***:***@")
+    : "(未设置)";
+  log("  数据库: " + dbUrlShort);
 
   // ─── 1. 确认数据库结构 ───
   log("[1/5] 更新数据库结构...");
