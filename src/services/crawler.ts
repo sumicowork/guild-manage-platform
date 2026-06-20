@@ -469,7 +469,7 @@ export async function runUpdateCrawl(
     const allSeenFeedIds = new Set<string>();
 
     while (consecutiveCleanPages < 2) {
-      const page = await getGuildFeeds(gid, cursor, 20, 2);
+      const page = await getGuildFeeds(gid, cursor, 500, 2);
       if (!page.feeds || page.feeds.length === 0) break;
 
       let pageHasChanges = false;
