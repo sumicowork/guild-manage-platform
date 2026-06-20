@@ -167,7 +167,11 @@ async function main() {
     fs.rmSync(buildDir, { recursive: true, force: true });
   }
   try {
-    run("npm run build", { stdio: "inherit", timeout: 600000 });
+    run("npm run build", {
+      stdio: "inherit",
+      timeout: 600000,
+      env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=2048" },
+    });
     log("  ✓ 构建完成");
   } catch (e) {
     log("  ✗ 构建失败: " + e.message);
