@@ -287,7 +287,7 @@ export async function runFullCrawl(
     const allFeedIds: string[] = [];
 
     while (true) {
-      const page = await getGuildFeeds(gid, cursor, 20, 1);
+      const page = await getGuildFeeds(gid, cursor, 20, 2);
       if (!page.feeds || page.feeds.length === 0) break;
 
       for (const feed of page.feeds) {
@@ -469,7 +469,7 @@ export async function runUpdateCrawl(
     const allSeenFeedIds = new Set<string>();
 
     while (consecutiveCleanPages < 2) {
-      const page = await getGuildFeeds(gid, cursor, 20, 1);
+      const page = await getGuildFeeds(gid, cursor, 20, 2);
       if (!page.feeds || page.feeds.length === 0) break;
 
       let pageHasChanges = false;
