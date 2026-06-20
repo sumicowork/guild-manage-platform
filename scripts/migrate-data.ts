@@ -12,6 +12,7 @@
  */
 
 import { PrismaClient } from "../src/generated/prisma/client.js";
+import { PrismaPg } from "@prisma/adapter-pg";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -27,10 +28,8 @@ const DETAIL_JSON = path.join(OUTPUT_DIR, "82203161765285899_20260528_151950_det
 
 const BATCH_SIZE = 500;
 
-// Prisma v7 requires adapter/accelerateUrl at type level, but the runtime
-// config (prisma.config.ts) provides DATABASE_URL. This matches the pattern in src/lib/db.ts.
-// @ts-expect-error -- runtime config handles datasource
-const prisma = new PrismaClient();
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
+const prisma = new PrismaClient({ adapter });
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 

@@ -32,12 +32,14 @@ function checkDbHasData() {
     const n = parseInt(out.trim(), 10);
     if (n >= 0) return n;
   } catch {}
-  // 方法2：node -e 用 @prisma/client
+  // 方法2：node -e 用 @prisma/client + @prisma/adapter-pg
   try {
     const out = run(
       `node -e "
       const { PrismaClient } = require('@prisma/client');
-      new PrismaClient().feed.count().then(c => { console.log(c); process.exit(0); }).catch(() => process.exit(1));
+      const { PrismaPg } = require('@prisma/adapter-pg');
+      const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+      new PrismaClient({ adapter }).feed.count().then(c => { console.log(c); process.exit(0); }).catch(() => process.exit(1));
       " 2>/dev/null && echo "OK" || echo "FAIL"`,
       { timeout: 15000 }
     );
