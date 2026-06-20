@@ -37,7 +37,10 @@ const prisma = new PrismaClient({ adapter });
 function parseDateTime(raw: string | number | undefined | null): Date | null {
   if (!raw) return null;
   if (typeof raw === "number") return new Date(raw * 1000);
-  const d = new Date(String(raw).replace(" ", "T") + "+08:00");
+  const s = String(raw).trim();
+  // 纯数字字符串视为 Unix 时间戳（秒）
+  if (/^\d+$/.test(s)) return new Date(Number(s) * 1000);
+  const d = new Date(s.replace(" ", "T") + "+08:00");
   return isNaN(d.getTime()) ? null : d;
 }
 
