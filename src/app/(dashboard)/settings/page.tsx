@@ -184,10 +184,12 @@ export default function SettingsPage() {
   // Start CLI login: get QR code data
   const handleStartCliLogin = async () => {
     try {
-      const data = await api.post<{ authUrl: string | null; qrcodeBase64: string | null }>(
-        '/cli/login',
-        {}
-      );
+      const data = await api.post<{
+        authUrl: string | null;
+        qrcodeBase64: string | null;
+        message?: string | null;
+        expiresIn?: number | null;
+      }>('/cli/login', {});
       setLoginQrData(data);
       setLoginDialogOpen(true);
       // Start polling in background

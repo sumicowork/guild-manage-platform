@@ -67,9 +67,11 @@ export async function POST(req: NextRequest) {
     const data = result.data || {};
 
     return success({
-      authUrl: data.authUrl || data.auth_url || data.url || null,
-      qrcodeBase64: data.qrcodeBase64 || data.qrcode_base64 || data.qrcode || null,
-      qrcodePath: data.qrcodePath || data.qrcode_path || null,
+      authUrl: data.verification_uri || data.authUrl || data.auth_url || null,
+      qrcodeBase64: data.qr_code || data.qrcodeBase64 || data.qrcode_base64 || null,
+      qrcodePath: data.qrcode_path || data.qrcodePath || null,
+      message: data.message || null,
+      expiresIn: data.expires_in_s || null,
     });
   } catch (err) {
     console.error("CLI login start error:", err);
