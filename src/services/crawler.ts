@@ -12,12 +12,16 @@ const GUILD_ID = process.env.GUILD_ID || "";
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-/** Parse a "YYYY-MM-DD HH:mm:ss" or Unix timestamp into a Date */
+/** Parse a "YYYY-MM-DD HH:mm:ss", Unix number, or numeric string timestamp into a Date */
 function parseDateTime(
   raw: string | number | undefined | null
 ): Date | null {
   if (!raw) return null;
   if (typeof raw === "number") return new Date(raw * 1000);
+  // Handle numeric strings like "1780050984" (Unix timestamps as strings)
+  if (typeof raw === "string" && /^\d+$/.test(raw)) {
+    return new Date(parseInt(raw, 10) * 1000);
+  }
   // Handle "YYYY-MM-DD HH:mm:ss" format
   const d = new Date(raw.replace(" ", "T") + "+08:00");
   return isNaN(d.getTime()) ? null : d;
@@ -198,7 +202,24 @@ async function upsertReply(
   });
 }
 
-async function upsertMember(member: any): Promise<void> {
+/**
+ * Normalize member object from CLI.
+ * CLI `manage get-guild-member-list` may return Chinese keys:
+ *   加入时间 → joinTime,  昵称 → nickname
+ */
+function normalizeMember(m: any): any {
+  return {
+    tinyid: m.tinyid,
+    nickname: m.nickname ?? m["昵称"] ?? null,
+    role: m.role ?? null,
+    joinTime: m.joinTime ?? m["加入时间"] ?? null,
+    joinTime_human: m.joinTime_human ?? null,
+    _user_info: m._user_info || {},
+  };
+}
+
+async function upsertMember(rawMember: any): Promise<void> {
+  const member = normalizeMember(rawMember);
   const userInfo = member._user_info || {};
   const joinTime = parseDateTime(member.joinTime);
 
@@ -391,8 +412,8 @@ export async function runFullCrawl(
         await updateTaskStats(taskId, { ...stats, phase: "members" });
       }
 
-      if (!memberPage.nextCursor) break;
-      memberCursor = memberPage.nextCursor;
+      if (!memberPage.nextPageToken) break;
+      memberCursor = memberPage.nextPageToken;
     }
 
     log(taskId, `Phase 4 complete: ${stats.membersTotal} members`);
@@ -619,8 +640,8 @@ export async function runMemberCrawl(
         await updateTaskStats(taskId, { ...stats, phase: "members" });
       }
 
-      if (!page.nextCursor) break;
-      cursor = page.nextCursor;
+      if (!page.nextPageToken) break;
+      cursor = page.nextPageToken;
     }
 
     // Mark members not seen in this crawl as "left"

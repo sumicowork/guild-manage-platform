@@ -5,108 +5,124 @@ import { executeCli } from "./executor";
  */
 export interface MemberPage {
   members: any[];
-  nextCursor: string;
+  nextPageToken: string;
+  hasMore: boolean;
+}
+
+/**
+ * Result shape for member search.
+ */
+export interface MemberSearchResult {
+  members: any[];
+  nextPos: string;
+}
+
+/**
+ * 从 CLI JSON 响应中提取 data 字段。
+ */
+function extractData(result: any): any {
+  if (!result) return null;
+  if (result.data !== undefined) return result.data;
+  return result;
 }
 
 /**
  * Fetches a page of guild members.
  *
- * CLI command: `member get-guild-members --guild-id X --cursor X --count N`
+ * CLI: `manage get-guild-member-list --guild-id X [--next-page-token X]`
  *
- * @param guildId  Guild ID
- * @param cursor   Pagination cursor (empty string for the first page)
- * @param count    Number of members per page
+ * 返回的 member 对象包含: role, tinyid, 加入时间, 昵称
  */
 export async function getGuildMembers(
   guildId: string,
-  cursor: string,
-  count: number
+  cursor: string = "",
+  _count: number = 100 // CLI 不支持自定义数量，由服务端决定
 ): Promise<MemberPage> {
-  const result = await executeCli("member", "get-guild-members", {
+  const flags: Record<string, string | number | boolean> = {
     "guild-id": guildId,
-    cursor,
-    count,
-  });
+  };
+  if (cursor) flags["next-page-token"] = cursor;
 
-  if (!result) {
-    return { members: [], nextCursor: "" };
+  const result = await executeCli("manage", "get-guild-member-list", flags);
+  const data = extractData(result);
+
+  if (!data) {
+    return { members: [], nextPageToken: "", hasMore: false };
   }
 
-  const members: any[] = Array.isArray(result)
-    ? result
-    : result.members || [];
-  const nextCursor: string = result.next_cursor ?? result.nextCursor ?? "";
+  const members: any[] = data.members || [];
+  const nextPageToken: string = data.next_page_token || "";
+  const hasMore: boolean = data.has_more ?? (nextPageToken !== "");
 
-  return { members, nextCursor };
+  return { members, nextPageToken, hasMore };
 }
 
 /**
- * Searches guild members by keyword (nickname match).
+ * Search members by nickname.
  *
- * CLI command: `member search-members --guild-id X --keyword X --cursor X`
- *
- * @param guildId  Guild ID
- * @param keyword  Search keyword (matches against nickname)
- * @param cursor   Pagination cursor
+ * CLI: `manage guild-member-search --guild-id X --keyword X [--num N] [--next-pos X]`
  */
 export async function searchMembers(
   guildId: string,
   keyword: string,
-  cursor: string
-): Promise<MemberPage> {
-  const result = await executeCli("member", "search-members", {
+  cursor: string = ""
+): Promise<MemberSearchResult> {
+  const flags: Record<string, string | number | boolean> = {
     "guild-id": guildId,
     keyword,
-    cursor,
-  });
+  };
+  if (cursor) flags["next-pos"] = cursor;
 
-  if (!result) {
-    return { members: [], nextCursor: "" };
+  const result = await executeCli("manage", "guild-member-search", flags);
+  const data = extractData(result);
+
+  if (!data) {
+    return { members: [], nextPos: "" };
   }
 
-  const members: any[] = Array.isArray(result)
-    ? result
-    : result.members || [];
-  const nextCursor: string = result.next_cursor ?? result.nextCursor ?? "";
+  const members: any[] = data.members || data.results || [];
+  const nextPos: string = data.next_pos || "";
 
-  return { members, nextCursor };
+  return { members, nextPos };
 }
 
 /**
- * Fetches detailed user info by tiny ID.
+ * Get detailed user info.
  *
- * CLI command: `member get-user-info --tiny-id X`
- *
- * @param tinyId  The user's tiny ID
+ * CLI: `manage get-user-info [--guild-id X] [--tiny-id X]`
  */
-export async function getUserInfo(tinyId: string): Promise<any> {
-  const result = await executeCli("member", "get-user-info", {
+export async function getUserInfo(
+  tinyId: string,
+  guildId?: string
+): Promise<any> {
+  const flags: Record<string, string | number | boolean> = {
     "tiny-id": tinyId,
-  });
+  };
+  if (guildId) flags["guild-id"] = guildId;
 
-  return result || null;
+  const result = await executeCli("manage", "get-user-info", flags);
+  return extractData(result);
 }
 
 /**
- * Mutes a user in the guild for a specified duration.
+ * Mute a user until a specific timestamp.
  *
- * CLI command: `member mute-user --guild-id X --tiny-id X --duration N`
+ * CLI: `manage modify-member-shut-up --guild-id X --tiny-id X --time-stamp X`
  *
  * @param guildId   Guild ID
- * @param tinyId    User's tiny ID
- * @param duration  Mute duration in seconds
- * @returns true on success
+ * @param tinyId    Member tiny ID
+ * @param timestamp Unix timestamp when mute expires (0 = unmute)
  */
 export async function muteUser(
   guildId: string,
   tinyId: string,
-  duration: number
+  timestamp: string
 ): Promise<boolean> {
   try {
-    await executeCli("member", "mute-user", {
+    await executeCli("manage", "modify-member-shut-up", {
       "guild-id": guildId,
       "tiny-id": tinyId,
-      duration,
+      "time-stamp": timestamp,
     });
     return true;
   } catch (err) {
@@ -116,20 +132,16 @@ export async function muteUser(
 }
 
 /**
- * Kicks a user from the guild.
+ * Kick a user from the guild.
  *
- * CLI command: `member kick-user --guild-id X --tiny-id X --yes`
- *
- * @param guildId  Guild ID
- * @param tinyId   User's tiny ID
- * @returns true on success
+ * CLI: `manage kick-guild-member --guild-id X --tiny-id X --yes`
  */
 export async function kickUser(
   guildId: string,
   tinyId: string
 ): Promise<boolean> {
   try {
-    await executeCli("member", "kick-user", {
+    await executeCli("manage", "kick-guild-member", {
       "guild-id": guildId,
       "tiny-id": tinyId,
       yes: true,
@@ -142,14 +154,9 @@ export async function kickUser(
 }
 
 /**
- * Sends a direct message to a guild member.
+ * Send a direct message to a user.
  *
- * CLI command: `member send-dm --guild-id X --tiny-id X --content X`
- *
- * @param guildId  Guild ID
- * @param tinyId   Recipient's tiny ID
- * @param content  Message content
- * @returns true on success
+ * CLI: `manage push-group-dm-msg --peer-tiny-id X --source-guild-id X --text X`
  */
 export async function sendDM(
   guildId: string,
@@ -157,10 +164,10 @@ export async function sendDM(
   content: string
 ): Promise<boolean> {
   try {
-    await executeCli("member", "send-dm", {
-      "guild-id": guildId,
-      "tiny-id": tinyId,
-      content,
+    await executeCli("manage", "push-group-dm-msg", {
+      "peer-tiny-id": tinyId,
+      "source-guild-id": guildId,
+      text: content,
     });
     return true;
   } catch (err) {

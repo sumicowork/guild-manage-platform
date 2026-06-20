@@ -177,11 +177,14 @@ export async function POST(req: NextRequest) {
     let targetTitle: string = "";
     let targetShareUrl: string = "";
     let targetCommentId: string | null = null;
+    let targetChannelName: string | null = null;
+    let targetCreateTimeRaw: bigint | null = null;
+    let targetCommentAuthorId: string | null = null;
 
     if (targetType === "feed") {
       const feed = await prisma.feed.findUnique({
         where: { feed_id: targetId },
-        select: { author: true, author_id: true, feed_id: true, title: true, share_url: true },
+        select: { author: true, author_id: true, feed_id: true, title: true, share_url: true, channel_name: true, create_time_raw: true },
       });
       if (feed) {
         resolvedTargetAuthor = feed.author;
@@ -189,12 +192,14 @@ export async function POST(req: NextRequest) {
         resolvedTargetFeedId = feed.feed_id;
         targetTitle = feed.title || "";
         targetShareUrl = feed.share_url || "";
+        targetChannelName = feed.channel_name;
+        targetCreateTimeRaw = feed.create_time_raw;
       }
     } else if (targetType === "comment") {
       const comment = await prisma.comment.findUnique({
         where: { comment_id: targetId },
         include: {
-          feed: { select: { feed_id: true, title: true, share_url: true } },
+          feed: { select: { feed_id: true, title: true, share_url: true, channel_name: true, create_time_raw: true } },
         },
       });
       if (comment) {
@@ -202,15 +207,18 @@ export async function POST(req: NextRequest) {
         resolvedTargetAuthorId = comment.author_id;
         resolvedTargetFeedId = comment.feed_id;
         targetCommentId = comment.comment_id;
+        targetCommentAuthorId = comment.author_id;
         targetTitle = comment.feed?.title || "";
         targetShareUrl = comment.feed?.share_url || "";
+        targetChannelName = comment.feed?.channel_name;
+        targetCreateTimeRaw = comment.feed?.create_time_raw;
       }
     } else if (targetType === "reply") {
       const reply = await prisma.reply.findUnique({
         where: { reply_id: targetId },
         include: {
           comment: true,
-          feed: { select: { feed_id: true, title: true, share_url: true } },
+          feed: { select: { feed_id: true, title: true, share_url: true, channel_name: true, create_time_raw: true } },
         },
       });
       if (reply) {
@@ -220,6 +228,8 @@ export async function POST(req: NextRequest) {
         targetCommentId = reply.comment_id;
         targetTitle = reply.feed?.title || "";
         targetShareUrl = reply.feed?.share_url || "";
+        targetChannelName = reply.feed?.channel_name;
+        targetCreateTimeRaw = reply.feed?.create_time_raw;
       }
     }
 
@@ -269,9 +279,10 @@ export async function POST(req: NextRequest) {
     const isMove = actionType.includes("move");
     const isDelete = actionType.includes("delete");
     const isMute = actionType.includes("mute");
+    const feedCreateTimeStr = targetCreateTimeRaw ? String(targetCreateTimeRaw) : "";
 
     if (isMove && targetType === "feed" && resolvedTargetFeedId && targetChannel) {
-      const ok = await movePost(GUILD_ID, resolvedTargetFeedId, targetChannel);
+      const ok = await movePost(GUILD_ID, resolvedTargetFeedId, targetChannel, targetChannelName || "");
       cliResults.push(ok ? "移帖成功" : "移帖失败");
       // Update feed status in DB
       if (ok) {
@@ -284,7 +295,7 @@ export async function POST(req: NextRequest) {
 
     if (isDelete) {
       if (targetType === "feed" && resolvedTargetFeedId) {
-        const ok = await deletePost(GUILD_ID, resolvedTargetFeedId);
+        const ok = await deletePost(GUILD_ID, resolvedTargetFeedId, targetChannelName || "", feedCreateTimeStr);
         cliResults.push(ok ? "删帖成功" : "删帖失败");
         if (ok) {
           await prisma.feed.update({
@@ -293,7 +304,10 @@ export async function POST(req: NextRequest) {
           });
         }
       } else if (targetType === "comment" && resolvedTargetFeedId && targetCommentId) {
-        const ok = await deleteComment(resolvedTargetFeedId, GUILD_ID, targetCommentId);
+        const ok = await deleteComment(
+          resolvedTargetFeedId, GUILD_ID, targetCommentId,
+          targetCommentAuthorId || "", feedCreateTimeStr
+        );
         cliResults.push(ok ? "删评论成功" : "删评论失败");
         if (ok) {
           await prisma.comment.update({
@@ -308,8 +322,9 @@ export async function POST(req: NextRequest) {
     }
 
     if (isMute && resolvedTargetAuthorId && mute?.duration) {
-      const durationSec = Number(mute.duration) * 3600; // hours → seconds
-      const ok = await muteUser(GUILD_ID, resolvedTargetAuthorId, durationSec);
+      // muteUser expects expiry Unix timestamp as string (current time + duration hours)
+      const expiryTimestamp = String(Math.floor(Date.now() / 1000) + Number(mute.duration) * 3600);
+      const ok = await muteUser(GUILD_ID, resolvedTargetAuthorId, expiryTimestamp);
       cliResults.push(ok ? `禁言${mute.duration}h成功` : "禁言失败");
     }
 
@@ -328,7 +343,7 @@ export async function POST(req: NextRequest) {
       });
 
       if (notifType === "comment" && resolvedTargetFeedId) {
-        notificationSent = await postComment(resolvedTargetFeedId, GUILD_ID, finalText);
+        notificationSent = await postComment(resolvedTargetFeedId, GUILD_ID, finalText, feedCreateTimeStr);
       } else if (notifType === "dm") {
         notificationSent = await sendDM(GUILD_ID, resolvedTargetAuthorId, finalText);
       }

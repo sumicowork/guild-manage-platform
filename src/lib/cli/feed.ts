@@ -6,6 +6,7 @@ import { executeCli } from "./executor";
 export interface FeedPage {
   feeds: any[];
   nextCursor: string;
+  hasMore: boolean;
 }
 
 /**
@@ -27,79 +28,84 @@ export interface FeedDetail {
 }
 
 /**
+ * 从 CLI JSON 响应中提取 data 字段。
+ * CLI 统一返回 { data: {...}, success: true } 格式。
+ */
+function extractData(result: any): any {
+  if (!result) return null;
+  // CLI 返回 { data: {...}, success: true }
+  if (result.data !== undefined) return result.data;
+  // 兼容直接返回数据的情况
+  return result;
+}
+
+/**
  * Fetches a page of guild feeds.
  *
- * CLI command: `feed get-guild-feeds --guild-id X --cursor X --count N --get-type N`
- *
- * @param guildId  Guild (channel) ID
- * @param cursor   Pagination cursor (empty string for the first page)
- * @param count    Number of feeds to fetch per page
- * @param getType  Feed type filter (1 = all, 2 = images, etc.)
+ * CLI: `feed get-guild-feeds --guild-id X [--feed-attach-info X] --count N --get-type N`
  */
 export async function getGuildFeeds(
   guildId: string,
   cursor: string,
   count: number,
-  getType: number
+  getType: number = 2
 ): Promise<FeedPage> {
-  const result = await executeCli("feed", "get-guild-feeds", {
+  const flags: Record<string, string | number | boolean> = {
     "guild-id": guildId,
-    cursor: cursor,
     count,
     "get-type": getType,
-  });
+  };
+  // 翻页令牌只在非空时传入
+  if (cursor) flags["feed-attach-info"] = cursor;
 
-  if (!result) {
-    return { feeds: [], nextCursor: "" };
+  const result = await executeCli("feed", "get-guild-feeds", flags);
+  const data = extractData(result);
+
+  if (!data) {
+    return { feeds: [], nextCursor: "", hasMore: false };
   }
 
-  // The CLI returns { feeds: [...], next_cursor: "..." } or an array directly
-  const feeds: any[] = Array.isArray(result) ? result : result.feeds || [];
-  const nextCursor: string = result.next_cursor ?? result.nextCursor ?? "";
+  const feeds: any[] = data.feeds || [];
+  const nextCursor: string = data.feed_attach_info || "";
+  const hasMore: boolean = data.has_more ?? false;
 
-  return { feeds, nextCursor };
+  return { feeds, nextCursor, hasMore };
 }
 
 /**
  * Fetches comments for a specific feed.
  *
- * CLI command: `feed get-feed-comments --feed-id X --guild-id X --cursor X`
- *
- * @param feedId   Feed ID
- * @param guildId  Guild ID
- * @param cursor   Pagination cursor (empty string for the first page)
+ * CLI: `feed get-feed-comments --feed-id X --guild-id X [--attach-info X]`
  */
 export async function getFeedComments(
   feedId: string,
   guildId: string,
   cursor: string
 ): Promise<CommentPage> {
-  const result = await executeCli("feed", "get-feed-comments", {
+  const flags: Record<string, string | number | boolean> = {
     "feed-id": feedId,
     "guild-id": guildId,
-    cursor,
-  });
+  };
+  if (cursor) flags["attach-info"] = cursor;
 
-  if (!result) {
+  const result = await executeCli("feed", "get-feed-comments", flags);
+  const data = extractData(result);
+
+  if (!data) {
     return { comments: [], hasMore: false, nextCursor: "" };
   }
 
-  const comments: any[] = Array.isArray(result)
-    ? result
-    : result.comments || [];
-  const hasMore: boolean = result.has_more ?? result.hasMore ?? false;
-  const nextCursor: string = result.next_cursor ?? result.nextCursor ?? "";
+  const comments: any[] = data.comments || [];
+  const hasMore: boolean = data.has_more ?? false;
+  const nextCursor: string = data.attach_info || "";
 
   return { comments, hasMore, nextCursor };
 }
 
 /**
- * Fetches full detail for a single feed (content, share URL, type).
+ * Fetches full detail for a single feed.
  *
- * CLI command: `feed get-feed-detail --feed-id X --guild-id X`
- *
- * @param feedId   Feed ID
- * @param guildId  Guild ID
+ * CLI: `feed get-feed-detail --feed-id X --guild-id X`
  */
 export async function getFeedDetail(
   feedId: string,
@@ -109,36 +115,41 @@ export async function getFeedDetail(
     "feed-id": feedId,
     "guild-id": guildId,
   });
+  const data = extractData(result);
 
-  if (!result) {
+  if (!data) {
     return { content: "", share_url: "", feed_type: 0 };
   }
 
   return {
-    content: result.content ?? "",
-    share_url: result.share_url ?? "",
-    feed_type: result.feed_type ?? 0,
+    content: data.content ?? "",
+    share_url: data.share_url ?? "",
+    feed_type: data.feed_type ?? 0,
   };
 }
 
 /**
  * Moves a feed post to a different channel.
  *
- * CLI command: `feed move-feed --feed-id X --guild-id X --channel-id X --yes`
+ * CLI: `feed move-feed --guild-id X --feed-id X --channel-id X --original-channel-id X`
  *
- * @returns true on success
+ * @param guildId           Guild ID
+ * @param feedId            Feed ID
+ * @param channelId         Target channel ID
+ * @param originalChannelId Current channel ID of the feed
  */
 export async function movePost(
   guildId: string,
   feedId: string,
-  channelId: string
+  channelId: string,
+  originalChannelId: string
 ): Promise<boolean> {
   try {
     await executeCli("feed", "move-feed", {
       "feed-id": feedId,
       "guild-id": guildId,
       "channel-id": channelId,
-      yes: true,
+      "original-channel-id": originalChannelId,
     });
     return true;
   } catch (err) {
@@ -150,18 +161,25 @@ export async function movePost(
 /**
  * Deletes a feed post.
  *
- * CLI command: `feed del-feed --feed-id X --guild-id X --yes`
+ * CLI: `feed del-feed --feed-id X --guild-id X --channel-id X --create-time X --yes`
  *
- * @returns true on success
+ * @param guildId    Guild ID
+ * @param feedId     Feed ID
+ * @param channelId  Channel ID the feed belongs to
+ * @param createTime Feed creation timestamp (Unix seconds)
  */
 export async function deletePost(
   guildId: string,
-  feedId: string
+  feedId: string,
+  channelId: string,
+  createTime: string
 ): Promise<boolean> {
   try {
     await executeCli("feed", "del-feed", {
       "feed-id": feedId,
       "guild-id": guildId,
+      "channel-id": channelId,
+      "create-time": createTime,
       yes: true,
     });
     return true;
@@ -174,22 +192,30 @@ export async function deletePost(
 /**
  * Deletes a comment from a feed.
  *
- * CLI command: `feed do-comment --feed-id X --guild-id X --comment-id X --type 0`
- * (type=0 = delete comment)
+ * CLI: `feed do-comment --comment-type 0 --feed-id X --comment-id X --comment-author-id X --feed-create-time X --guild-id X --yes`
  *
- * @returns true on success
+ * @param feedId          Feed ID
+ * @param guildId         Guild ID
+ * @param commentId       Comment ID to delete
+ * @param commentAuthorId Author tinyid of the comment
+ * @param feedCreateTime  Feed creation timestamp (Unix seconds)
  */
 export async function deleteComment(
   feedId: string,
   guildId: string,
-  commentId: string
+  commentId: string,
+  commentAuthorId: string,
+  feedCreateTime: string
 ): Promise<boolean> {
   try {
     await executeCli("feed", "do-comment", {
       "feed-id": feedId,
       "guild-id": guildId,
       "comment-id": commentId,
-      type: 0,
+      "comment-author-id": commentAuthorId,
+      "feed-create-time": feedCreateTime,
+      "comment-type": 0,
+      yes: true,
     });
     return true;
   } catch (err) {
@@ -201,24 +227,26 @@ export async function deleteComment(
 /**
  * Posts a comment on a feed.
  *
- * CLI command: `feed do-comment --feed-id X --guild-id X --content X --type 1`
+ * CLI: `feed do-comment --feed-id X --guild-id X --content X --comment-type 1 --feed-create-time X`
  *
- * @param feedId   Feed ID to comment on
- * @param guildId  Guild ID
- * @param content  Comment text content
- * @returns true on success
+ * @param feedId         Feed ID
+ * @param guildId        Guild ID
+ * @param content        Comment text
+ * @param feedCreateTime Feed creation timestamp (Unix seconds)
  */
 export async function postComment(
   feedId: string,
   guildId: string,
-  content: string
+  content: string,
+  feedCreateTime: string
 ): Promise<boolean> {
   try {
     await executeCli("feed", "do-comment", {
       "feed-id": feedId,
       "guild-id": guildId,
       content,
-      type: 1,
+      "feed-create-time": feedCreateTime,
+      "comment-type": 1,
     });
     return true;
   } catch (err) {
@@ -230,19 +258,20 @@ export async function postComment(
 /**
  * Replies to a specific comment on a feed.
  *
- * CLI command: `feed do-reply --feed-id X --guild-id X --comment-id X --content X --type 1`
- *
- * @param feedId    Feed ID
- * @param guildId   Guild ID
- * @param commentId Comment ID to reply to
- * @param content   Reply text content
- * @returns true on success
+ * CLI: `feed do-reply --feed-id X --guild-id X --comment-id X --content X --reply-type 1 --replier-id X ...`
  */
 export async function replyToComment(
   feedId: string,
   guildId: string,
   commentId: string,
-  content: string
+  content: string,
+  replierId: string,
+  extra: {
+    feedAuthorId: string;
+    feedCreateTime: string;
+    commentAuthorId: string;
+    commentCreateTime: string;
+  }
 ): Promise<boolean> {
   try {
     await executeCli("feed", "do-reply", {
@@ -250,7 +279,12 @@ export async function replyToComment(
       "guild-id": guildId,
       "comment-id": commentId,
       content,
-      type: 1,
+      "reply-type": 1,
+      "replier-id": replierId,
+      "feed-author-id": extra.feedAuthorId,
+      "feed-create-time": extra.feedCreateTime,
+      "comment-author-id": extra.commentAuthorId,
+      "comment-create-time": extra.commentCreateTime,
     });
     return true;
   } catch (err) {
