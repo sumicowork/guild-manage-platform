@@ -1,9 +1,6 @@
 import { execFile } from "child_process";
-import { promisify } from "util";
 import fs from "fs";
 import path from "path";
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Resolves the CLI executable path.
@@ -23,8 +20,6 @@ function resolveCliPath(): string {
 
   // For relative/ bare command names on Windows, try .cmd suffix
   if (process.platform === "win32") {
-    // Check if the bare command resolves (i.e. it's on PATH)
-    // We try the base first; if execFile fails we'll try .cmd in executeCli
     return base;
   }
 
@@ -67,36 +62,8 @@ export class CliError extends Error {
 }
 
 /**
- * Builds an argument array from domain, action, and a flags record.
- * Automatically appends --json for machine-readable output.
- *
- * Example:
- *   buildArgs("feed", "get-guild-feeds", { "guild-id": "123", count: 20 })
- *   => ["feed", "get-guild-feeds", "--guild-id", "123", "--count", "20", "--json"]
- */
-function buildArgs(
-  domain: string,
-  action: string,
-  flags: Record<string, string | number | boolean>
-): string[] {
-  const args: string[] = [domain, action];
-
-  for (const [key, value] of Object.entries(flags)) {
-    if (value === false || value === undefined || value === null) continue;
-    const flagName = key.length === 1 ? `-${key}` : `--${key}`;
-    if (value === true) {
-      args.push(flagName);
-    } else {
-      args.push(flagName, String(value));
-    }
-  }
-
-  args.push("--json");
-  return args;
-}
-
-/**
  * Parses stdout as JSON. Returns null on empty output.
+ * Handles multi-line output by trying the last valid JSON line.
  */
 function parseOutput(stdout: string): unknown {
   const trimmed = stdout.trim();
@@ -104,7 +71,15 @@ function parseOutput(stdout: string): unknown {
   try {
     return JSON.parse(trimmed);
   } catch {
-    // Some CLIs emit non-JSON success messages; wrap them
+    // Try parsing the last line (some CLIs emit debug lines before JSON)
+    const lines = trimmed.split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        return JSON.parse(lines[i].trim());
+      } catch {
+        continue;
+      }
+    }
     return { raw: trimmed };
   }
 }
@@ -112,24 +87,26 @@ function parseOutput(stdout: string): unknown {
 /**
  * Core CLI executor.
  *
- * Executes: `<cli> <domain> <action> [flags...] [--json]`
+ * Executes: `<cli> <domain> <action> --json`
+ *
+ * Parameters are passed via stdin as JSON (snake_case keys), matching the
+ * original Python guild_scraper.py approach. The CLI tool reads stdin JSON
+ * for all action parameters — NOT command-line flags.
  *
  * Error handling:
- *  - Exit code 153 (rate limit): sleeps 70s then retries once.
+ *  - Exit code 153 (rate limit): exponential backoff + retry.
  *  - Exit code 8011 (auth failure): throws immediately.
  *  - Exit code 10014 (deleted data): returns null.
  *  - Other non-zero exits: throws CliError.
  *
- * @param domain    CLI domain, e.g. "feed" or "member"
+ * @param domain    CLI domain, e.g. "feed" or "manage"
  * @param action    CLI action, e.g. "get-guild-feeds"
- * @param flags     Key-value flags to pass as CLI arguments
- * @param stdinJson Optional JSON object piped to the process stdin
- * @returns Parsed JSON output from the CLI
+ * @param stdinJson JSON object piped to the process stdin (snake_case keys)
+ * @returns Parsed JSON data field from the CLI response
  */
 export async function executeCli(
   domain: string,
   action: string,
-  flags: Record<string, string | number | boolean> = {},
   stdinJson?: object
 ): Promise<any> {
   // Throttle: ensure minimum delay between calls
@@ -141,24 +118,62 @@ export async function executeCli(
   lastCallTime = Date.now();
 
   const cliBase = resolveCliPath();
-  const args = buildArgs(domain, action, flags);
+  const args = [domain, action, "--json"];
 
-  const run = async (cliPath: string): Promise<any> => {
-    const childPromise = execFileAsync(cliPath, args, {
-      maxBuffer: 100 * 1024 * 1024, // 100 MB — feed dumps can be large
-      timeout: 120_000, // 2 min timeout per call
-      env: { ...process.env },
+  const run = (cliPath: string): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      const child = execFile(
+        cliPath,
+        args,
+        {
+          maxBuffer: 100 * 1024 * 1024, // 100 MB — feed dumps can be large
+          timeout: 120_000, // 2 min timeout per call
+          env: { ...process.env },
+        },
+        (err, stdout, stderr) => {
+          if (err) {
+            // Attach stderr to the error for debugging
+            const execErr = Object.assign(new Error(err.message), {
+              code: (err as any).code ?? -1,
+              stderr: stderr || "",
+            });
+            reject(execErr);
+            return;
+          }
+          try {
+            const parsed = parseOutput(stdout);
+            // CLI returns { data: {...}, success: true }
+            if (parsed && typeof parsed === "object" && "success" in parsed) {
+              if ((parsed as any).success) {
+                resolve((parsed as any).data ?? parsed);
+              } else {
+                // CLI returned success: false — extract error info
+                const errInfo = (parsed as any).error || {};
+                const code = errInfo.code ?? -1;
+                const hint = errInfo.hint || errInfo.message || "Unknown error";
+                const fakeErr = Object.assign(new Error(hint), {
+                  code,
+                  stderr: JSON.stringify(errInfo),
+                });
+                reject(fakeErr);
+              }
+            } else {
+              resolve(parsed);
+            }
+          } catch (parseErr) {
+            reject(parseErr);
+          }
+        }
+      );
+
+      // Pipe stdin JSON if provided
+      if (stdinJson && child.stdin) {
+        child.stdin.write(JSON.stringify(stdinJson));
+        child.stdin.end();
+      } else if (child.stdin) {
+        child.stdin.end();
+      }
     });
-
-    // Pipe stdin if provided
-    if (stdinJson && childPromise.child) {
-      const child = childPromise.child;
-      child.stdin?.write(JSON.stringify(stdinJson));
-      child.stdin?.end();
-    }
-
-    const { stdout, stderr } = await childPromise;
-    return parseOutput(stdout);
   };
 
   const runWithFallback = async (): Promise<any> => {
@@ -187,7 +202,7 @@ export async function executeCli(
     const exitCode = typeof execErr?.code === "number" ? execErr.code : -1;
     const stderr = execErr?.stderr || execErr?.message || "";
 
-    // Rate limit: sleep 70s and retry once
+    // Rate limit: exponential backoff and retry
     if (exitCode === CliErrorCode.RATE_LIMIT) {
       console.warn(
         `[CLI] Rate limited (code 153) on ${domain} ${action}. Sleeping 70s before retry...`

@@ -412,8 +412,8 @@ export async function runFullCrawl(
         await updateTaskStats(taskId, { ...stats, phase: "members" });
       }
 
-      if (!memberPage.nextPageToken) break;
-      memberCursor = memberPage.nextPageToken;
+      if (!memberPage.nextPos) break;
+      memberCursor = memberPage.nextPos;
     }
 
     log(taskId, `Phase 4 complete: ${stats.membersTotal} members`);
@@ -640,8 +640,8 @@ export async function runMemberCrawl(
         await updateTaskStats(taskId, { ...stats, phase: "members" });
       }
 
-      if (!page.nextPageToken) break;
-      cursor = page.nextPageToken;
+      if (!page.nextPos) break;
+      cursor = page.nextPos;
     }
 
     // Mark members not seen in this crawl as "left"

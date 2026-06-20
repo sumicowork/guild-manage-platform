@@ -5,7 +5,7 @@ import { executeCli } from "./executor";
  */
 export interface MemberPage {
   members: any[];
-  nextPageToken: string;
+  nextPos: string;
   hasMore: boolean;
 }
 
@@ -18,63 +18,59 @@ export interface MemberSearchResult {
 }
 
 /**
- * 从 CLI JSON 响应中提取 data 字段。
- */
-function extractData(result: any): any {
-  if (!result) return null;
-  if (result.data !== undefined) return result.data;
-  return result;
-}
-
-/**
- * Fetches a page of guild members.
+ * Fetches a page of guild members via member search (space keyword).
  *
- * CLI: `manage get-guild-member-list --guild-id X [--next-page-token X]`
+ * CLI: `manage guild-member-search --json`
+ * stdin: { guild_id, keyword: " ", num: 50, next_pos? }
  *
- * 返回的 member 对象包含: role, tinyid, 加入时间, 昵称
+ * Python scraper reference:
+ *   body = {"guild_id": gid, "keyword": " ", "num": 50}
+ *   if next_pos: body["next_pos"] = next_pos
+ *   run_cli(["manage", "guild-member-search"], stdin_data=body)
  */
 export async function getGuildMembers(
   guildId: string,
   cursor: string = "",
-  _count: number = 100 // CLI 不支持自定义数量，由服务端决定
+  _count: number = 50
 ): Promise<MemberPage> {
-  const flags: Record<string, string | number | boolean> = {
-    "guild-id": guildId,
+  const body: Record<string, any> = {
+    guild_id: guildId,
+    keyword: " ",
+    num: 50,
   };
-  if (cursor) flags["next-page-token"] = cursor;
+  if (cursor) body.next_pos = cursor;
 
-  const result = await executeCli("manage", "get-guild-member-list", flags);
-  const data = extractData(result);
+  const data = await executeCli("manage", "guild-member-search", body);
 
   if (!data) {
-    return { members: [], nextPageToken: "", hasMore: false };
+    return { members: [], nextPos: "", hasMore: false };
   }
 
   const members: any[] = data.members || [];
-  const nextPageToken: string = data.next_page_token || "";
-  const hasMore: boolean = data.has_more ?? (nextPageToken !== "");
+  const nextPos: string = data.next_pos || "";
+  const hasMore: boolean = data.has_more ?? (nextPos !== "");
 
-  return { members, nextPageToken, hasMore };
+  return { members, nextPos, hasMore };
 }
 
 /**
- * Search members by nickname.
+ * Search members by keyword.
  *
- * CLI: `manage guild-member-search --guild-id X --keyword X [--num N] [--next-pos X]`
+ * CLI: `manage guild-member-search --json`
+ * stdin: { guild_id, keyword, next_pos? }
  */
 export async function searchMembers(
   guildId: string,
   keyword: string,
   cursor: string = ""
 ): Promise<MemberSearchResult> {
-  const flags: Record<string, string | number | boolean> = {
-    "guild-id": guildId,
+  const body: Record<string, any> = {
+    guild_id: guildId,
     keyword,
   };
-  if (cursor) flags["next-pos"] = cursor;
+  if (cursor) body.next_pos = cursor;
 
-  const result = await executeCli("manage", "guild-member-search", flags);
-  const data = extractData(result);
+  const data = await executeCli("manage", "guild-member-search", body);
 
   if (!data) {
     return { members: [], nextPos: "" };
@@ -89,25 +85,30 @@ export async function searchMembers(
 /**
  * Get detailed user info.
  *
- * CLI: `manage get-user-info [--guild-id X] [--tiny-id X]`
+ * CLI: `manage get-user-info --json`
+ * stdin: { tiny_id }
+ *
+ * Python scraper reference:
+ *   body = {"tiny_id": tid}
+ *   run_cli(["manage", "get-user-info"], stdin_data=body)
  */
 export async function getUserInfo(
   tinyId: string,
   guildId?: string
 ): Promise<any> {
-  const flags: Record<string, string | number | boolean> = {
-    "tiny-id": tinyId,
+  const body: Record<string, any> = {
+    tiny_id: tinyId,
   };
-  if (guildId) flags["guild-id"] = guildId;
+  if (guildId) body.guild_id = guildId;
 
-  const result = await executeCli("manage", "get-user-info", flags);
-  return extractData(result);
+  return await executeCli("manage", "get-user-info", body);
 }
 
 /**
  * Mute a user until a specific timestamp.
  *
- * CLI: `manage modify-member-shut-up --guild-id X --tiny-id X --time-stamp X`
+ * CLI: `manage modify-member-shut-up --json`
+ * stdin: { guild_id, tiny_id, time_stamp }
  *
  * @param guildId   Guild ID
  * @param tinyId    Member tiny ID
@@ -120,9 +121,9 @@ export async function muteUser(
 ): Promise<boolean> {
   try {
     await executeCli("manage", "modify-member-shut-up", {
-      "guild-id": guildId,
-      "tiny-id": tinyId,
-      "time-stamp": timestamp,
+      guild_id: guildId,
+      tiny_id: tinyId,
+      time_stamp: timestamp,
     });
     return true;
   } catch (err) {
@@ -134,7 +135,8 @@ export async function muteUser(
 /**
  * Kick a user from the guild.
  *
- * CLI: `manage kick-guild-member --guild-id X --tiny-id X --yes`
+ * CLI: `manage kick-guild-member --json`
+ * stdin: { guild_id, tiny_id }
  */
 export async function kickUser(
   guildId: string,
@@ -142,9 +144,8 @@ export async function kickUser(
 ): Promise<boolean> {
   try {
     await executeCli("manage", "kick-guild-member", {
-      "guild-id": guildId,
-      "tiny-id": tinyId,
-      yes: true,
+      guild_id: guildId,
+      tiny_id: tinyId,
     });
     return true;
   } catch (err) {
@@ -156,7 +157,8 @@ export async function kickUser(
 /**
  * Send a direct message to a user.
  *
- * CLI: `manage push-group-dm-msg --peer-tiny-id X --source-guild-id X --text X`
+ * CLI: `manage push-group-dm-msg --json`
+ * stdin: { peer_tiny_id, source_guild_id, text }
  */
 export async function sendDM(
   guildId: string,
@@ -165,8 +167,8 @@ export async function sendDM(
 ): Promise<boolean> {
   try {
     await executeCli("manage", "push-group-dm-msg", {
-      "peer-tiny-id": tinyId,
-      "source-guild-id": guildId,
+      peer_tiny_id: tinyId,
+      source_guild_id: guildId,
       text: content,
     });
     return true;
