@@ -4,7 +4,7 @@
  * 在只允许填写一个启动命令的容器环境中使用：
  *   node start.js
  *
- * 它会依次执行：db push → 数据导入 → 构建（如无）→ next start（前台）
+ * 它会依次执行：db push → 验证连接 → 数据导入 → 构建（如无）→ next start（前台）
  */
 const { execSync, spawn } = require("child_process");
 const path = require("path");
@@ -22,8 +22,8 @@ function run(cmd, opts = {}) {
   return execSync(cmd, { ...defaults, ...opts });
 }
 
-function checkDbHasData() {
-  // 方法1：psql 直查
+async function checkDbHasData() {
+  // 方法1：psql 直查（适用于 psql 在同一容器）
   try {
     const out = run(
       `psql "${PG_URL}" -c "SELECT COUNT(*) FROM feeds" -t -A 2>/dev/null || echo "-1"`,
@@ -32,24 +32,31 @@ function checkDbHasData() {
     const n = parseInt(out.trim(), 10);
     if (n >= 0) return n;
   } catch {}
-  // 方法2：node -e 用 @prisma/client + @prisma/adapter-pg
+
+  // 方法2：直接 require Prisma（不走 shell 子进程，避免 $ 被展开）
   try {
-    const out = run(
-      `node -e "
-      const { PrismaClient } = require('@prisma/client');
-      const { PrismaPg } = require('@prisma/adapter-pg');
-      const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
-      new PrismaClient({ adapter }).feed.count().then(c => { console.log(c); process.exit(0); }).catch(() => process.exit(1));
-      " 2>/dev/null && echo "OK" || echo "FAIL"`,
-      { timeout: 15000 }
-    );
-    const trimmed = out.trim();
-    if (!trimmed.endsWith("OK")) return null;
-    const num = parseInt(trimmed.replace("OK","").trim(), 10);
-    return isNaN(num) ? null : num;
-  } catch {
+    const { PrismaClient } = require("@prisma/client");
+    const { PrismaPg } = require("@prisma/adapter-pg");
+    const adapter = new PrismaPg({ connectionString: PG_URL });
+    const p = new PrismaClient({ adapter });
+    const count = await p.feed.count();
+    await p.$disconnect();
+    return count;
+  } catch (e) {
+    log("  ⚠ Prisma 查询失败: " + (e.message || "").slice(0, 200));
     return null;
   }
+}
+
+async function verifyDb() {
+  const { PrismaClient } = require("@prisma/client");
+  const { PrismaPg } = require("@prisma/adapter-pg");
+  log("  ✓ 依赖加载成功");
+  const adapter = new PrismaPg({ connectionString: PG_URL });
+  const p = new PrismaClient({ adapter });
+  await p.$connect();
+  log("  ✓ 数据库连接成功");
+  await p.$disconnect();
 }
 
 async function main() {
@@ -76,33 +83,10 @@ async function main() {
   // ─── 2. 验证数据库连接 ───
   log("[2/5] 验证数据库连接...");
   try {
-    run(
-      `node -e "
-      try {
-        const { PrismaClient } = require('@prisma/client');
-        const { PrismaPg } = require('@prisma/adapter-pg');
-        console.log('  ✓ 依赖加载成功');
-        const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL || '' });
-        const p = new PrismaClient({ adapter });
-        p.\$connect().then(() => {
-          console.log('  ✓ 数据库连接成功');
-          p.\$disconnect();
-          process.exit(0);
-        }).catch(e => {
-          console.error('  ✗ 数据库连接失败:', e.message || e);
-          process.exit(1);
-        });
-      } catch(e) {
-        console.error('  ✗ 初始化失败:', e.message || e);
-        process.exit(1);
-      }
-      "`,
-      { timeout: 15000, stdio: "pipe" }
-    );
+    await verifyDb();
   } catch (e) {
-    const errMsg = (e.stderr || e.stdout || e.message || "").toString().trim();
     log("  ✗ 数据库不可用，无法启动服务");
-    if (errMsg) log("  → 原因: " + errMsg.slice(0, 500));
+    log("  → 原因: " + (e.message || e).toString().slice(0, 500));
     log("");
     log("  请检查:");
     log("  1. DATABASE_URL 环境变量是否正确设置");
@@ -113,7 +97,7 @@ async function main() {
 
   // ─── 3. 检查数据并导入 ───
   log("[3/5] 检查数据状态...");
-  const count = checkDbHasData();
+  const count = await checkDbHasData();
 
   // 只有明确查到有数据才跳过导入
   if (count !== null && count > 0) {
