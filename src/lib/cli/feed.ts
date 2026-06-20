@@ -172,6 +172,33 @@ export async function deletePost(
 }
 
 /**
+ * Deletes a comment from a feed.
+ *
+ * CLI command: `feed do-comment --feed-id X --guild-id X --comment-id X --type 0`
+ * (type=0 = delete comment)
+ *
+ * @returns true on success
+ */
+export async function deleteComment(
+  feedId: string,
+  guildId: string,
+  commentId: string
+): Promise<boolean> {
+  try {
+    await executeCli("feed", "do-comment", {
+      "feed-id": feedId,
+      "guild-id": guildId,
+      "comment-id": commentId,
+      type: 0,
+    });
+    return true;
+  } catch (err) {
+    console.error(`[CLI] deleteComment failed for comment ${commentId}:`, err);
+    return false;
+  }
+}
+
+/**
  * Posts a comment on a feed.
  *
  * CLI command: `feed do-comment --feed-id X --guild-id X --content X --type 1`

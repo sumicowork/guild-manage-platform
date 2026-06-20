@@ -37,16 +37,20 @@ RUN addgroup --system --gid 1001 nodejs && \
 # 从 builder 复制产物
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/src/generated ./src/generated
+COPY --from=builder /app/src ./src
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.ts ./next.config.ts
+COPY --from=builder /app/postcss.config.mjs ./postcss.config.mjs
+COPY --from=builder /app/components.json ./components.json
+COPY --from=builder /app/eslint.config.mjs ./eslint.config.mjs
 COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
-# 复制启动脚本
-COPY entrypoint.sh /entrypoint.sh
+# 复制启动脚本（start.js 会在每次启动时重建前端）
+COPY start.js entrypoint.sh /
+COPY output/ output/
 RUN chmod +x /entrypoint.sh && chown -R nextjs:nodejs /app
 
 USER nextjs

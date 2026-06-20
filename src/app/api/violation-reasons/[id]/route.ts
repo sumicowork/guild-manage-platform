@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, success, error, serializeBigInt } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
 
 export async function PUT(
   req: NextRequest,
@@ -44,7 +44,9 @@ export async function PUT(
       },
     });
 
-    return success(serializeBigInt(updated));
+    const raw = serializeBigInt(updated);
+    const mapped = toCamelCase(raw) as any;
+    return success({ ...mapped, id: Number(mapped.id) });
   } catch (err) {
     console.error("Violation reason update error:", err);
     return error("更新违规原因失败", 500);

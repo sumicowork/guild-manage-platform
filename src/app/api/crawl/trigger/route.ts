@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import { prisma } from "@/lib/db";
 import {
   getAuthUser,
   unauthorized,
@@ -9,6 +8,8 @@ import {
   serializeBigInt,
   toCamelCase,
 } from "@/lib/api-utils";
+import { prisma } from "@/lib/db";
+import { triggerCrawl } from "@/services/scheduler";
 
 export async function POST(req: NextRequest) {
   try {
@@ -28,14 +29,21 @@ export async function POST(req: NextRequest) {
       return error("type 必须是 full、incremental 或 members 之一", 400);
     }
 
-    const task = await prisma.crawlTask.create({
-      data: {
-        task_type: taskType,
-        status: "pending",
-        triggered_by: "manual",
-        triggered_by_user: BigInt(auth.userId),
-      },
+    // Use scheduler to create task and start crawl in background
+    const taskId = await triggerCrawl(
+      taskType as "full" | "update" | "members",
+      "manual",
+      Number(auth.userId)
+    );
+
+    // Fetch the created task to return
+    const task = await prisma.crawlTask.findUnique({
+      where: { id: taskId },
     });
+
+    if (!task) {
+      return error("任务创建失败", 500);
+    }
 
     const rawTask = serializeBigInt(task);
     const camelTask = toCamelCase(rawTask) as any;
@@ -50,6 +58,9 @@ export async function POST(req: NextRequest) {
     return success(mapped);
   } catch (err) {
     console.error("Crawl trigger error:", err);
+    if (err instanceof Error && err.message.includes("already running")) {
+      return error(err.message, 409);
+    }
     return error("触发爬取任务失败", 500);
   }
 }
