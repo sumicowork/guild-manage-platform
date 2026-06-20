@@ -58,7 +58,7 @@ async function main() {
   log("================================================");
 
   // ─── 1. 确认数据库结构 ───
-  log("[1/4] 更新数据库结构...");
+  log("[1/5] 更新数据库结构...");
   try {
     run("npx prisma generate", { stdio: "pipe" });
     log("  ✓ Prisma Client 已生成");
@@ -73,8 +73,46 @@ async function main() {
     log("  → 数据库可能未就绪，继续尝试启动...");
   }
 
-  // ─── 2. 检查数据并导入 ───
-  log("[2/4] 检查数据状态...");
+  // ─── 2. 验证数据库连接 ───
+  log("[2/5] 验证数据库连接...");
+  try {
+    run(
+      `node -e "
+      try {
+        const { PrismaClient } = require('@prisma/client');
+        const { PrismaPg } = require('@prisma/adapter-pg');
+        console.log('  ✓ 依赖加载成功');
+        const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL || '' });
+        const p = new PrismaClient({ adapter });
+        p.\$connect().then(() => {
+          console.log('  ✓ 数据库连接成功');
+          p.\$disconnect();
+          process.exit(0);
+        }).catch(e => {
+          console.error('  ✗ 数据库连接失败:', e.message || e);
+          process.exit(1);
+        });
+      } catch(e) {
+        console.error('  ✗ 初始化失败:', e.message || e);
+        process.exit(1);
+      }
+      "`,
+      { timeout: 15000, stdio: "pipe" }
+    );
+  } catch (e) {
+    const errMsg = (e.stderr || e.stdout || e.message || "").toString().trim();
+    log("  ✗ 数据库不可用，无法启动服务");
+    if (errMsg) log("  → 原因: " + errMsg.slice(0, 500));
+    log("");
+    log("  请检查:");
+    log("  1. DATABASE_URL 环境变量是否正确设置");
+    log("  2. PostgreSQL 是否在运行且可从本容器访问");
+    log("  3. 网络/防火墙是否放行");
+    process.exit(1);
+  }
+
+  // ─── 3. 检查数据并导入 ───
+  log("[3/5] 检查数据状态...");
   const count = checkDbHasData();
 
   // 只有明确查到有数据才跳过导入
@@ -120,10 +158,10 @@ async function main() {
     }
   }
 
-  // ─── 3. 确保构建存在 ───
+  // ─── 4. 确保构建存在 ───
   const buildIdPath = path.join(ROOT, ".next", "BUILD_ID");
   if (!fs.existsSync(buildIdPath)) {
-    log("[3/4] 未检测到生产构建，正在构建...");
+    log("[4/5] 未检测到生产构建，正在构建...");
     try {
       run("npm run build", { stdio: "inherit", timeout: 300000 });
       log("  ✓ 构建完成");
@@ -135,9 +173,9 @@ async function main() {
     log("  ✓ 生产构建已存在");
   }
 
-  // ─── 4. 启动 Next.js 服务（前台进程） ───
+  // ─── 5. 启动 Next.js 服务（前台进程） ───
   log("================================================");
-  log("  启动服务：端口 " + (process.env.PORT || "3000"));
+  log("[5/5] 启动服务：端口 " + (process.env.PORT || "3000"));
   log("================================================");
 
   const next = spawn("node", ["./node_modules/.bin/next", "start"], {
