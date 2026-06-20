@@ -1,4 +1,4 @@
-import { execFile } from "child_process";
+import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 
@@ -124,57 +124,88 @@ export async function executeCli(
 
   const run = (cliPath: string): Promise<any> => {
     return new Promise((resolve, reject) => {
-      const child = execFile(
-        cliPath,
-        args,
-        {
-          maxBuffer: 100 * 1024 * 1024, // 100 MB — feed dumps can be large
-          timeout: 120_000, // 2 min timeout per call
-          env: { ...process.env },
-        },
-        (err, stdout, stderr) => {
-          if (err) {
-            // Attach stderr to the error for debugging
-            const execErr = Object.assign(new Error(err.message), {
-              code: (err as any).code ?? -1,
-              stderr: stderr || "",
-            });
-            reject(execErr);
-            return;
-          }
-          try {
-            const parsed = parseOutput(stdout);
-            // CLI returns { data: {...}, success: true }
-            if (parsed && typeof parsed === "object" && "success" in parsed) {
-              if ((parsed as any).success) {
-                resolve((parsed as any).data ?? parsed);
-              } else {
-                // CLI returned success: false — extract error info
-                const errInfo = (parsed as any).error || {};
-                const code = errInfo.code ?? -1;
-                const hint = errInfo.hint || errInfo.message || "Unknown error";
-                const fakeErr = Object.assign(new Error(hint), {
-                  code,
-                  stderr: JSON.stringify(errInfo),
-                });
-                reject(fakeErr);
-              }
-            } else {
-              resolve(parsed);
-            }
-          } catch (parseErr) {
-            reject(parseErr);
-          }
-        }
-      );
+      const child = spawn(cliPath, args, {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env },
+        // Windows needs shell: true to run .cmd wrappers
+        shell: process.platform === "win32",
+      });
 
-      // Pipe stdin JSON if provided
-      if (stdinJson && child.stdin) {
-        child.stdin.write(JSON.stringify(stdinJson));
-        child.stdin.end();
-      } else if (child.stdin) {
-        child.stdin.end();
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
+      let totalStdout = 0;
+      const MAX_BUFFER = 100 * 1024 * 1024; // 100 MB
+
+      child.stdout.on("data", (chunk: Buffer) => {
+        totalStdout += chunk.length;
+        if (totalStdout > MAX_BUFFER) {
+          child.kill();
+          reject(new Error("CLI stdout exceeded max buffer"));
+          return;
+        }
+        stdoutChunks.push(chunk);
+      });
+
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderrChunks.push(chunk);
+      });
+
+      // Apply timeout
+      const timer = setTimeout(() => {
+        child.kill();
+        reject(new Error(`CLI ${domain} ${action} timed out after 120s`));
+      }, 120_000);
+
+      child.on("error", (err) => {
+        clearTimeout(timer);
+        reject(Object.assign(err, { code: -1, stderr: err.message }));
+      });
+
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
+        const stderr = Buffer.concat(stderrChunks).toString("utf-8");
+
+        if (code !== 0) {
+          // Include stdout in error — CLI writes validation errors there
+          const errObj = Object.assign(
+            new Error(`CLI ${domain} ${action} failed (exit ${code}): ${stdout.trim().slice(0, 300)}`),
+            { code: code ?? -1, stderr: stderr || "", stdout: stdout || "" }
+          );
+          reject(errObj);
+          return;
+        }
+
+        try {
+          const parsed = parseOutput(stdout);
+          if (parsed && typeof parsed === "object" && "success" in parsed) {
+            if ((parsed as any).success) {
+              resolve((parsed as any).data ?? parsed);
+            } else {
+              const errInfo = (parsed as any).error || {};
+              const eCode = errInfo.code ?? -1;
+              const hint = errInfo.hint || errInfo.message || "Unknown error";
+              const fakeErr = Object.assign(new Error(hint), {
+                code: eCode,
+                stderr: JSON.stringify(errInfo),
+              });
+              reject(fakeErr);
+            }
+          } else {
+            resolve(parsed);
+          }
+        } catch (parseErr) {
+          reject(parseErr);
+        }
+      });
+
+      // Pipe stdin JSON — spawn guarantees stdin is a writable pipe
+      if (stdinJson) {
+        const jsonStr = JSON.stringify(stdinJson);
+        console.log(`[CLI] ${domain} ${action} stdin: ${jsonStr.slice(0, 200)}`);
+        child.stdin.write(jsonStr);
       }
+      child.stdin.end();
     });
   };
 
