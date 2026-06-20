@@ -51,9 +51,15 @@ if [ "$DATA_COUNT" = "0" ] || [ "$DATA_COUNT" = "0n" ]; then
 
     if [ -f "$MAIN_JSON" ]; then
         echo "[4/5] 从 JSON 导入历史数据..."
-        # 创建软链接到脚本预期的位置
+        # 将 JSON_DATA_DIR 中的所有 .json 文件链接到 output/ 目录
+        # 会自动匹配伴生文件: *_comments.json, *_detail.json
         mkdir -p /app/output
-        ln -sf "$JSON_DIR"/*.json /app/output/ 2>/dev/null || true
+        for f in "$JSON_DIR"/*.json; do
+            [ -f "$f" ] && ln -sf "$f" /app/output/
+        done
+        echo "  文件来源: $JSON_DIR"
+        echo "  文件列表:"
+        ls -la /app/output/*.json 2>/dev/null | sed 's/^/    /'
         node --loader ts-node/esm scripts/migrate-data.ts 2>&1 || \
         npx tsx scripts/migrate-data.ts 2>&1 || \
         echo "  ⚠ 数据迁移失败（可忽略，后续手动导入）"

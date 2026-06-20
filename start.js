@@ -53,9 +53,15 @@ async function main() {
       );
       if (fs.existsSync(jsonFile)) {
         console.log("[3/4] 从 JSON 导入历史数据...");
-        // 创建 output 软链接
+        // 将 JSON 目录中的所有 .json 文件复制到 output/ 目录
+        // 会自动匹配伴生文件: *_comments.json, *_detail.json
         const outputDir = path.join(ROOT, "output");
         if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+        const jsonFiles = fs.readdirSync(jsonDir).filter(f => f.endsWith(".json"));
+        for (const f of jsonFiles) {
+          fs.copyFileSync(path.join(jsonDir, f), path.join(outputDir, f));
+        }
+        console.log(`  来源: ${jsonDir}, 共 ${jsonFiles.length} 个文件`);
         try {
           execSync(`npx tsx scripts/migrate-data.ts`, {
             cwd: ROOT,
