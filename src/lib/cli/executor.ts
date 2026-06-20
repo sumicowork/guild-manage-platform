@@ -18,9 +18,11 @@ function resolveCliPath(): string {
     return base;
   }
 
-  // For relative/ bare command names on Windows, try .cmd suffix
-  if (process.platform === "win32") {
-    return base;
+  // Check node_modules/.bin first (local project install)
+  const localBin = path.join(process.cwd(), "node_modules", ".bin", base);
+  if (fs.existsSync(localBin)) return localBin;
+  if (process.platform === "win32" && fs.existsSync(localBin + ".cmd")) {
+    return localBin + ".cmd";
   }
 
   return base;

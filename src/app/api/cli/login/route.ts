@@ -1,15 +1,30 @@
 import { NextRequest } from "next/server";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import fs from "fs";
+import path from "path";
 import { getAuthUser, unauthorized, forbidden, success, error } from "@/lib/api-utils";
 
 const execFileAsync = promisify(execFile);
 
 function resolveCliPath(): string {
   const base = process.env.CLI_PATH || "tencent-channel-cli";
-  if (process.platform === "win32" && !base.endsWith(".cmd") && !base.endsWith(".exe")) {
+
+  if (path.isAbsolute(base)) {
+    if (fs.existsSync(base)) return base;
+    if (process.platform === "win32" && fs.existsSync(base + ".cmd")) {
+      return base + ".cmd";
+    }
     return base;
   }
+
+  // Check node_modules/.bin first (local project install)
+  const localBin = path.join(process.cwd(), "node_modules", ".bin", base);
+  if (fs.existsSync(localBin)) return localBin;
+  if (process.platform === "win32" && fs.existsSync(localBin + ".cmd")) {
+    return localBin + ".cmd";
+  }
+
   return base;
 }
 
