@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, success, error, serializeBigInt } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,7 +11,12 @@ export async function GET(req: NextRequest) {
       orderBy: { sort_order: "asc" },
     });
 
-    return success(serializeBigInt(reasons));
+    const rawReasons = serializeBigInt(reasons);
+    const mapped = (toCamelCase(rawReasons) as any[]).map((r: any) => ({
+      ...r,
+      id: Number(r.id),
+    }));
+    return success(mapped);
   } catch (err) {
     console.error("Violation reasons list error:", err);
     return error("获取违规原因列表失败", 500);
@@ -52,7 +57,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    return success(serializeBigInt(reason));
+    return success({ ...toCamelCase(serializeBigInt(reason)) as any, id: Number(reason.id) });
   } catch (err) {
     console.error("Violation reason create error:", err);
     return error("创建违规原因失败", 500);

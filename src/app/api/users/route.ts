@@ -8,6 +8,7 @@ import {
   success,
   error,
   serializeBigInt,
+  toCamelCase,
 } from "@/lib/api-utils";
 
 export async function GET(req: NextRequest) {
@@ -31,7 +32,8 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    return success(serializeBigInt(users));
+    const rawUsers = serializeBigInt(users);
+    return success(toCamelCase(rawUsers));
   } catch (err) {
     console.error("Users list error:", err);
     return error("获取用户列表失败", 500);
@@ -80,7 +82,8 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    return success(serializeBigInt(user));
+    const rawUser = serializeBigInt(user);
+    return success(toCamelCase(rawUser));
   } catch (err) {
     console.error("User create error:", err);
     return error("创建用户失败", 500);

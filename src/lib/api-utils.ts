@@ -40,3 +40,18 @@ export function serializeBigInt<T>(obj: T): T {
   }
   return obj;
 }
+
+// Convert snake_case keys to camelCase recursively
+export function toCamelCase<T>(obj: T): T {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) return obj.map(toCamelCase) as unknown as T;
+  if (typeof obj === "object" && !(obj instanceof Date)) {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      const camelKey = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+      result[camelKey] = toCamelCase(value);
+    }
+    return result as T;
+  }
+  return obj;
+}

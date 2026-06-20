@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, success, error, serializeBigInt } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
 import type { Prisma } from "@/generated/prisma/client";
 
 export async function GET(req: NextRequest) {
@@ -12,10 +12,10 @@ export async function GET(req: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "20", 10)));
     const search = searchParams.get("search")?.trim() || undefined;
-    const channel = searchParams.get("channel")?.trim() || undefined;
+    const channelId = searchParams.get("channelId")?.trim() || undefined;
     const status = searchParams.get("status") || "active";
-    const sortBy = searchParams.get("sortBy") || "time";
-    const sortOrder = searchParams.get("sortOrder") || "desc";
+    const sort = searchParams.get("sort") || "createdAt";
+    const direction = searchParams.get("direction") || "desc";
     const dateFrom = searchParams.get("dateFrom") || undefined;
     const dateTo = searchParams.get("dateTo") || undefined;
     const authorId = searchParams.get("authorId")?.trim() || undefined;
@@ -30,8 +30,8 @@ export async function GET(req: NextRequest) {
     }
 
     // Channel filter
-    if (channel) {
-      where.channel_name = channel;
+    if (channelId) {
+      where.channel_name = channelId;
     }
 
     // Author filter
@@ -62,16 +62,16 @@ export async function GET(req: NextRequest) {
 
     // Sort
     let orderBy: Prisma.FeedOrderByWithRelationInput;
-    switch (sortBy) {
-      case "likes":
-        orderBy = { prefer_count: sortOrder === "asc" ? "asc" : "desc" };
+    switch (sort) {
+      case "likeCount":
+        orderBy = { prefer_count: direction === "asc" ? "asc" : "desc" };
         break;
-      case "comments":
-        orderBy = { comment_count: sortOrder === "asc" ? "asc" : "desc" };
+      case "commentCount":
+        orderBy = { comment_count: direction === "asc" ? "asc" : "desc" };
         break;
-      case "time":
+      case "createdAt":
       default:
-        orderBy = { create_time: sortOrder === "asc" ? "asc" : "desc" };
+        orderBy = { create_time: direction === "asc" ? "asc" : "desc" };
         break;
     }
 
@@ -85,7 +85,18 @@ export async function GET(req: NextRequest) {
       prisma.feed.count({ where }),
     ]);
 
-    return success(serializeBigInt(feeds), {
+    const rawFeeds = serializeBigInt(feeds);
+    const camelFeeds = toCamelCase(rawFeeds) as any[];
+    const mapped = camelFeeds.map((f: any) => {
+      const { preferCount, ...rest } = f;
+      return {
+        ...rest,
+        likeCount: preferCount ?? 0,
+        commentCount: f.commentCount ?? 0,
+        channelId: '',
+      };
+    });
+    return success(mapped, {
       page,
       pageSize,
       total,

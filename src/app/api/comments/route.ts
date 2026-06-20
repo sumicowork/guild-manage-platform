@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, success, error, serializeBigInt } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
 import type { Prisma } from "@/generated/prisma/client";
 
 export async function GET(req: NextRequest) {
@@ -58,7 +58,15 @@ export async function GET(req: NextRequest) {
       prisma.comment.count({ where }),
     ]);
 
-    return success(serializeBigInt(comments), {
+    const rawComments = serializeBigInt(comments);
+    const camelComments = toCamelCase(rawComments) as any[];
+    const mapped = camelComments.map((c: any) => ({
+      ...c,
+      content: c.contentText || '',
+      feedTitle: c.feed?.title ?? '',
+      likeCount: c.likeCount ?? 0,
+    }));
+    return success(mapped, {
       page,
       pageSize,
       total,

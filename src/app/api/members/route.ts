@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, success, error, serializeBigInt } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
 import type { Prisma } from "@/generated/prisma/client";
 
 export async function GET(req: NextRequest) {
@@ -83,7 +83,17 @@ export async function GET(req: NextRequest) {
       commentCount: commentCountMap.get(m.tinyid) || 0,
     }));
 
-    return success(serializeBigInt(enriched), {
+    const rawEnriched = serializeBigInt(enriched);
+    const camelEnriched = toCamelCase(rawEnriched) as any[];
+    const mapped = camelEnriched.map((m: any) => ({
+      ...m,
+      joinedAt: m.joinTime ?? null,
+      feedCount: m.postCount ?? 0,
+      likeCount: 0,
+      tags: (m.tags || []).map((t: any) => t.tag),
+    }));
+
+    return success(mapped, {
       page,
       pageSize,
       total,

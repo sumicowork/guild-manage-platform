@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, success, error, serializeBigInt } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
 import type { Prisma } from "@/generated/prisma/client";
 
 export async function GET(req: NextRequest) {
@@ -12,10 +12,11 @@ export async function GET(req: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "20", 10)));
     const targetType = searchParams.get("target_type") || undefined;
-    const violationReason = searchParams.get("violation_reason") || undefined;
+    const violationReason = searchParams.get("reason") || undefined;
+    const actionType = searchParams.get("actionType") || undefined;
     const dateFrom = searchParams.get("dateFrom") || undefined;
     const dateTo = searchParams.get("dateTo") || undefined;
-    const operatorUserId = searchParams.get("operator_user_id") || undefined;
+    const operator = searchParams.get("operator")?.trim() || undefined;
     const targetAuthorId = searchParams.get("target_author_id") || undefined;
 
     const where: Prisma.ViolationWhereInput = {};
@@ -28,8 +29,18 @@ export async function GET(req: NextRequest) {
       where.violation_reason = violationReason;
     }
 
-    if (operatorUserId) {
-      where.operator_user_id = BigInt(operatorUserId);
+    if (actionType) {
+      where.action_type = actionType;
+    }
+
+    if (operator) {
+      const opUser = await prisma.platformUser.findFirst({
+        where: { username: operator },
+        select: { id: true },
+      });
+      if (opUser) {
+        where.operator_user_id = opUser.id;
+      }
     }
 
     if (targetAuthorId) {
@@ -84,7 +95,16 @@ export async function GET(req: NextRequest) {
       prisma.violation.count({ where }),
     ]);
 
-    return success(serializeBigInt(violations), {
+    const rawViolations = serializeBigInt(violations);
+    const camelViolations = toCamelCase(rawViolations) as any[];
+    const mapped = camelViolations.map((v: any) => ({
+      ...v,
+      reason: v.violationReason ?? '',
+      operator: v.user?.username ?? v.user?.displayName ?? '',
+      identityName: v.operatorAdminName ?? '',
+      notified: v.notificationSent ?? false,
+    }));
+    return success(mapped, {
       page,
       pageSize,
       total,
@@ -106,20 +126,37 @@ export async function POST(req: NextRequest) {
       targetType,
       targetId,
       violationReason,
+      reasonId,
       violationDetail,
+      detail,
       actionType,
       actionDetail,
+      targetChannel,
+      mute,
       notification,
+      targetAuthorId,
+      targetFeedId,
     } = body;
 
-    if (!targetType || !targetId || !violationReason || !actionType) {
-      return error("缺少必要参数：targetType, targetId, violationReason, actionType", 400);
+    // Resolve violation reason: accept either reason name (violationReason) or reasonId
+    let resolvedReason = violationReason;
+    if (!resolvedReason && reasonId) {
+      const reason = await prisma.violationReason.findUnique({
+        where: { id: Number(reasonId) },
+      });
+      if (reason) {
+        resolvedReason = reason.name;
+      }
+    }
+
+    if (!targetType || !targetId || !resolvedReason || !actionType) {
+      return error("缺少必要参数：targetType, targetId, violationReason/reasonId, actionType", 400);
     }
 
     // Resolve target author info based on target type
-    let targetAuthor: string | null = null;
-    let targetAuthorId: string | null = null;
-    let targetFeedId: string | null = null;
+    let resolvedTargetAuthor: string | null = targetAuthorId ? null : null;
+    let resolvedTargetAuthorId: string | null = targetAuthorId || null;
+    let resolvedTargetFeedId: string | null = targetFeedId || null;
 
     if (targetType === "feed") {
       const feed = await prisma.feed.findUnique({
@@ -127,9 +164,9 @@ export async function POST(req: NextRequest) {
         select: { author: true, author_id: true, feed_id: true },
       });
       if (feed) {
-        targetAuthor = feed.author;
-        targetAuthorId = feed.author_id;
-        targetFeedId = feed.feed_id;
+        resolvedTargetAuthor = feed.author;
+        resolvedTargetAuthorId = feed.author_id;
+        resolvedTargetFeedId = feed.feed_id;
       }
     } else if (targetType === "comment") {
       const comment = await prisma.comment.findUnique({
@@ -137,9 +174,9 @@ export async function POST(req: NextRequest) {
         select: { author: true, author_id: true, feed_id: true },
       });
       if (comment) {
-        targetAuthor = comment.author;
-        targetAuthorId = comment.author_id;
-        targetFeedId = comment.feed_id;
+        resolvedTargetAuthor = comment.author;
+        resolvedTargetAuthorId = comment.author_id;
+        resolvedTargetFeedId = comment.feed_id;
       }
     } else if (targetType === "reply") {
       const reply = await prisma.reply.findUnique({
@@ -147,26 +184,34 @@ export async function POST(req: NextRequest) {
         select: { author: true, author_id: true, feed_id: true },
       });
       if (reply) {
-        targetAuthor = reply.author;
-        targetAuthorId = reply.author_id;
-        targetFeedId = reply.feed_id;
+        resolvedTargetAuthor = reply.author;
+        resolvedTargetAuthorId = reply.author_id;
+        resolvedTargetFeedId = reply.feed_id;
       }
     }
+
+    // Build action_detail from client fields
+    const resolvedActionDetail: Record<string, unknown> = {};
+    if (targetChannel) resolvedActionDetail.movedToChannel = targetChannel;
+    if (mute?.duration) resolvedActionDetail.muteDurationHours = mute.duration;
+    if (actionDetail) Object.assign(resolvedActionDetail, actionDetail);
 
     const violation = await prisma.violation.create({
       data: {
         target_type: targetType,
         target_id: targetId,
-        target_feed_id: targetFeedId,
-        target_author: targetAuthor,
-        target_author_id: targetAuthorId,
-        violation_reason: violationReason,
-        violation_detail: violationDetail || null,
+        target_feed_id: resolvedTargetFeedId,
+        target_author: resolvedTargetAuthor,
+        target_author_id: resolvedTargetAuthorId,
+        violation_reason: resolvedReason,
+        violation_detail: (detail || violationDetail) || null,
         action_type: actionType,
-        action_detail: actionDetail ? (actionDetail as Prisma.InputJsonValue) : undefined,
-        notification_sent: notification?.enabled ? true : false,
-        notification_type: notification?.enabled ? notification.type : null,
-        notification_text: notification?.enabled ? notification.text : null,
+        action_detail: Object.keys(resolvedActionDetail).length > 0
+          ? (resolvedActionDetail as Prisma.InputJsonValue)
+          : undefined,
+        notification_sent: notification?.enabled || notification?.type ? true : false,
+        notification_type: notification?.type || null,
+        notification_text: notification?.content || notification?.text || null,
         operator_user_id: BigInt(auth.userId),
       },
       include: {

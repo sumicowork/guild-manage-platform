@@ -11,18 +11,29 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const targetType = searchParams.get("target_type") || undefined;
-    const violationReason = searchParams.get("violation_reason") || undefined;
+    const violationReason = searchParams.get("reason") || undefined;
+    const actionType = searchParams.get("actionType") || undefined;
     const dateFrom = searchParams.get("dateFrom") || undefined;
     const dateTo = searchParams.get("dateTo") || undefined;
-    const operatorUserId = searchParams.get("operator_user_id") || undefined;
+    const operator = searchParams.get("operator")?.trim() || undefined;
     const targetAuthorId = searchParams.get("target_author_id") || undefined;
 
     const where: Prisma.ViolationWhereInput = {};
 
     if (targetType) where.target_type = targetType;
     if (violationReason) where.violation_reason = violationReason;
-    if (operatorUserId) where.operator_user_id = BigInt(operatorUserId);
+    if (actionType) where.action_type = actionType;
     if (targetAuthorId) where.target_author_id = targetAuthorId;
+
+    if (operator) {
+      const opUser = await prisma.platformUser.findFirst({
+        where: { username: operator },
+        select: { id: true },
+      });
+      if (opUser) {
+        where.operator_user_id = opUser.id;
+      }
+    }
 
     if (dateFrom || dateTo) {
       where.created_at = {};

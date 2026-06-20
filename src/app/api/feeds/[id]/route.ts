@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, success, error, serializeBigInt } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
 
 export async function GET(
   req: NextRequest,
@@ -42,7 +42,26 @@ export async function GET(
       return error("帖子不存在", 404);
     }
 
-    return success(serializeBigInt(feed));
+    const raw = serializeBigInt(feed);
+    const camel = toCamelCase(raw) as any;
+    // Map fields to match client Feed interface
+    const mapped = {
+      ...camel,
+      likeCount: camel.preferCount ?? 0,
+      channelId: '',
+      comments: (camel.comments || []).map((c: any) => ({
+        ...c,
+        content: c.contentText || '',
+        likeCount: c.likeCount ?? 0,
+        replies: (c.replies || []).map((r: any) => ({
+          ...r,
+          content: r.contentText || '',
+          likeCount: r.likeCount ?? 0,
+        })),
+      })),
+    };
+
+    return success(mapped);
   } catch (err) {
     console.error("Feed detail error:", err);
     return error("获取帖子详情失败", 500);

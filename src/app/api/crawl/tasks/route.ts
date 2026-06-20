@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, success, error, serializeBigInt } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
 
 export async function GET(req: NextRequest) {
   try {
@@ -20,12 +20,17 @@ export async function GET(req: NextRequest) {
       prisma.crawlTask.count(),
     ]);
 
-    return success(serializeBigInt(tasks), {
-      page,
-      pageSize,
-      total,
-      totalPages: Math.ceil(total / pageSize),
-    });
+    const rawTasks = serializeBigInt(tasks);
+    const camelTasks = toCamelCase(rawTasks) as any[];
+    const mapped = camelTasks.map((t: any) => ({
+      ...t,
+      type: t.taskType,
+      trigger: t.triggeredBy,
+      startedAt: t.startedAt,
+      completedAt: t.finishedAt ?? null,
+      errorMessage: t.errorLog ?? null,
+    }));
+    return success(mapped, { total });
   } catch (err) {
     console.error("Crawl tasks list error:", err);
     return error("获取爬取任务列表失败", 500);

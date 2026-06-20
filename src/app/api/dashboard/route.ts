@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, success, error, serializeBigInt } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
 
 export async function GET(req: NextRequest) {
   try {
@@ -110,7 +110,17 @@ export async function GET(req: NextRequest) {
         todayViolations,
         totalViolations,
       },
-      lastCrawlTask: lastCrawlTask ? serializeBigInt(lastCrawlTask) : null,
+      lastCrawlTask: lastCrawlTask
+        ? (() => {
+            const raw = toCamelCase(serializeBigInt(lastCrawlTask)) as any;
+            return {
+              ...raw,
+              type: raw.taskType,
+              startedAt: raw.startedAt,
+              completedAt: raw.finishedAt ?? null,
+            };
+          })()
+        : null,
       violationTrend,
       violationReasons: violationByReason.map((v) => ({
         reason: v.violation_reason,

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, success, error, serializeBigInt } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
 
 export async function GET(
   req: NextRequest,
@@ -21,7 +21,17 @@ export async function GET(
       return error("爬取任务不存在", 404);
     }
 
-    return success(serializeBigInt(task));
+    const rawTask = serializeBigInt(task);
+    const camelTask = toCamelCase(rawTask) as any;
+    const mapped = {
+      ...camelTask,
+      type: camelTask.taskType,
+      trigger: camelTask.triggeredBy,
+      completedAt: camelTask.finishedAt ?? null,
+      errorMessage: camelTask.errorLog ?? null,
+    };
+
+    return success(mapped);
   } catch (err) {
     console.error("Crawl task detail error:", err);
     return error("获取爬取任务详情失败", 500);
