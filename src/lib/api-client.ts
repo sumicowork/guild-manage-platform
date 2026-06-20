@@ -38,7 +38,14 @@ class ApiClient {
       throw new Error(e.error || 'Request failed');
     }
 
-    return res.json();
+    const json = await res.json();
+
+    // 解包服务端 success() 的 { success: true, data: ... } 包装
+    if (json && json.success === true && 'data' in json) {
+      return json.data as T;
+    }
+
+    return json as T;
   }
 
   get<T>(path: string) {

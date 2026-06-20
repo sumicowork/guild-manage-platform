@@ -27,7 +27,8 @@ export async function GET(req: NextRequest) {
       lastCrawlTask,
       last7DaysViolations,
       violationByReason,
-      channelDistribution,
+      feedsByChannel,
+      commentsByChannel,
     ] = await Promise.all([
       // Basic counts
       prisma.feed.count({ where: { status: "active" } }),
@@ -71,6 +72,13 @@ export async function GET(req: NextRequest) {
         where: { status: "active" },
         _count: { channel_name: true },
       }),
+
+      // Comment count per channel
+      prisma.comment.groupBy({
+        by: ["channel_name"],
+        where: { status: "active" },
+        _count: { channel_name: true },
+      }),
     ]);
 
     // Build violation trend — fill in missing days with 0
@@ -92,25 +100,40 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // Build channel distribution — merge feeds and comments per channel
+    const channelFeedMap = new Map<string, number>();
+    const channelCommentMap = new Map<string, number>();
+    for (const c of feedsByChannel) {
+      channelFeedMap.set(c.channel_name || "未分类", c._count.channel_name);
+    }
+    for (const c of commentsByChannel) {
+      channelCommentMap.set(c.channel_name || "未分类", c._count.channel_name);
+    }
+    const allChannels = new Set([...channelFeedMap.keys(), ...channelCommentMap.keys()]);
+    const channelDistribution = Array.from(allChannels).map((channel) => ({
+      channel,
+      feeds: channelFeedMap.get(channel) || 0,
+      comments: channelCommentMap.get(channel) || 0,
+    }));
+
     return success({
-      totalFeeds,
-      totalComments,
-      totalMembers,
-      activeMembers,
-      todayNewFeeds,
-      todayNewComments,
-      todayViolations,
-      totalViolations,
+      stats: {
+        totalFeeds,
+        totalComments,
+        totalMembers,
+        activeMembers,
+        todayNewFeeds,
+        todayNewComments,
+        todayViolations,
+        totalViolations,
+      },
       lastCrawlTask: lastCrawlTask ? serializeBigInt(lastCrawlTask) : null,
       violationTrend,
-      violationByReason: violationByReason.map((v) => ({
+      violationReasons: violationByReason.map((v) => ({
         reason: v.violation_reason,
         count: v._count.violation_reason,
       })),
-      channelDistribution: channelDistribution.map((c) => ({
-        channel: c.channel_name || "未分类",
-        count: c._count.channel_name,
-      })),
+      channelDistribution,
     });
   } catch (err) {
     console.error("Dashboard error:", err);
