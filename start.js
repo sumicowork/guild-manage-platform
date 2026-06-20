@@ -9,6 +9,7 @@
 const { execSync, spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const { Pool } = require("pg");
 
 const ROOT = __dirname;
 const PG_URL = process.env.DATABASE_URL || "";
@@ -22,8 +23,19 @@ function run(cmd, opts = {}) {
   return execSync(cmd, { ...defaults, ...opts });
 }
 
+async function query(sql) {
+  if (!PG_URL) throw new Error("DATABASE_URL 未设置");
+  const pool = new Pool({ connectionString: PG_URL, max: 1, connectionTimeoutMillis: 10000 });
+  try {
+    const result = await pool.query(sql);
+    return result;
+  } finally {
+    await pool.end();
+  }
+}
+
 async function checkDbHasData() {
-  // 方法1：psql 直查（适用于 psql 在同一容器）
+  // 方法1：psql 直查
   try {
     const out = run(
       `psql "${PG_URL}" -c "SELECT COUNT(*) FROM feeds" -t -A 2>/dev/null || echo "-1"`,
@@ -33,30 +45,26 @@ async function checkDbHasData() {
     if (n >= 0) return n;
   } catch {}
 
-  // 方法2：直接 require Prisma（不走 shell 子进程，避免 $ 被展开）
+  // 方法2：pg 直连
   try {
-    const { PrismaClient } = require("@prisma/client");
-    const { PrismaPg } = require("@prisma/adapter-pg");
-    const adapter = new PrismaPg({ connectionString: PG_URL });
-    const p = new PrismaClient({ adapter });
-    const count = await p.feed.count();
-    await p.$disconnect();
-    return count;
+    const r = await query("SELECT COUNT(*) AS cnt FROM feeds");
+    const n = parseInt(r.rows[0].cnt, 10);
+    return isNaN(n) ? 0 : n;
   } catch (e) {
-    log("  ⚠ Prisma 查询失败: " + (e.message || "").slice(0, 200));
+    log("  ⚠ 数据库查询失败: " + (e.message || "").slice(0, 200));
     return null;
   }
 }
 
 async function verifyDb() {
-  const { PrismaClient } = require("@prisma/client");
-  const { PrismaPg } = require("@prisma/adapter-pg");
-  log("  ✓ 依赖加载成功");
-  const adapter = new PrismaPg({ connectionString: PG_URL });
-  const p = new PrismaClient({ adapter });
-  await p.$connect();
-  log("  ✓ 数据库连接成功");
-  await p.$disconnect();
+  const pool = new Pool({ connectionString: PG_URL, max: 1, connectionTimeoutMillis: 10000 });
+  try {
+    const client = await pool.connect();
+    log("  ✓ 数据库连接成功");
+    client.release();
+  } finally {
+    await pool.end();
+  }
 }
 
 async function main() {
