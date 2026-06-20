@@ -50,10 +50,17 @@ function toBigInt(v: string | number | undefined | null): bigint | null {
   }
 }
 
+function sanitize(v: any): string | null {
+  if (v === undefined || v === null) return null;
+  const s = String(v);
+  // Strips null bytes and other control chars except tab/newline
+  return s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "").trim() || null;
+}
+
 function extractContentText(content: any): string | null {
   if (!content) return null;
-  if (typeof content === "string") return content;
-  if (typeof content === "object" && content.text) return content.text;
+  if (typeof content === "string") return sanitize(content);
+  if (typeof content === "object" && content.text) return sanitize(content.text);
   return null;
 }
 
@@ -84,13 +91,13 @@ async function importFeeds(
         where: { feed_id: feed.feed_id },
         create: {
           feed_id: feed.feed_id,
-          author: feed.author ?? null,
-          author_id: feed.author_id ?? null,
-          channel_name: feed.channel_name ?? null,
-          title: feed.title ?? null,
-          content: detail.content ?? null,
-          content_snippet: feed.content_snippet ?? null,
-          share_url: detail.share_url ?? null,
+          author: sanitize(feed.author),
+          author_id: sanitize(feed.author_id),
+          channel_name: sanitize(feed.channel_name),
+          title: sanitize(feed.title),
+          content: sanitize(detail.content),
+          content_snippet: sanitize(feed.content_snippet),
+          share_url: sanitize(detail.share_url),
           images: feed.images ?? null,
           prefer_count: feed.prefer_count ?? 0,
           comment_count: feed.comment_count ?? 0,
@@ -100,8 +107,8 @@ async function importFeeds(
           status: "active",
         },
         update: {
-          content: detail.content ?? undefined,
-          share_url: detail.share_url ?? undefined,
+          content: sanitize(detail.content) ?? undefined,
+          share_url: sanitize(detail.share_url) ?? undefined,
           feed_type: detail.feed_type ?? undefined,
           comment_count: feed.comment_count ?? undefined,
           prefer_count: feed.prefer_count ?? undefined,
@@ -153,10 +160,10 @@ async function importComments(
             create: {
               comment_id: comment.comment_id,
               feed_id: feedId,
-              author: comment.author ?? null,
-              author_id: comment.author_id ?? null,
+              author: sanitize(comment.author),
+              author_id: sanitize(comment.author_id),
               content: comment.content ?? null,
-              content_text: contentText ?? comment.content_text ?? null,
+              content_text: contentText ?? sanitize(comment.content_text),
               like_count: comment.like_count ?? 0,
               reply_count: comment.reply_count ?? 0,
               comment_index: comment.comment_index ?? null,
@@ -167,7 +174,7 @@ async function importComments(
             update: {
               like_count: comment.like_count ?? undefined,
               reply_count: comment.reply_count ?? undefined,
-              content_text: contentText ?? comment.content_text ?? undefined,
+              content_text: contentText ?? sanitize(comment.content_text) ?? undefined,
             },
           })
         );
@@ -187,13 +194,13 @@ async function importComments(
                   reply_id: reply.reply_id,
                   comment_id: comment.comment_id,
                   feed_id: feedId,
-                  author: reply.author ?? null,
-                  author_id: reply.author_id ?? null,
+                  author: sanitize(reply.author),
+                  author_id: sanitize(reply.author_id),
                   content: reply.content ?? null,
                   content_text: replyContentText ?? null,
-                  target_reply_id: reply.target_reply_id ?? null,
-                  target_user: reply.target_user ?? null,
-                  target_user_id: reply.target_user_id ?? null,
+                  target_reply_id: sanitize(reply.target_reply_id),
+                  target_user: sanitize(reply.target_user),
+                  target_user_id: sanitize(reply.target_user_id),
                   create_time: replyCreateTime,
                   create_time_raw: replyCreateTimeRaw,
                   status: "active",
@@ -247,23 +254,27 @@ async function importMembers(members: any[]): Promise<void> {
         where: { tinyid: member.tinyid },
         create: {
           tinyid: member.tinyid,
-          nickname: member.nickname ?? null,
-          global_nickname: userInfo.global_nickname ?? null,
-          country: userInfo.country || null,
-          city: userInfo.city || null,
-          gender: userInfo.gender || null,
+          nickname: sanitize(member.nickname),
+          global_nickname: sanitize(userInfo.global_nickname),
+          avatar_seq: sanitize(member.avatar_seq),
+          role: sanitize(member.role),
+          country: sanitize(userInfo.country),
+          city: sanitize(userInfo.city),
+          gender: sanitize(userInfo.gender),
           join_time: joinTime,
-          join_time_human: member.joinTime_human ?? null,
+          join_time_human: sanitize(member.joinTime_human),
           status: "active",
         },
         update: {
-          nickname: member.nickname ?? undefined,
-          global_nickname: userInfo.global_nickname ?? undefined,
-          country: userInfo.country || undefined,
-          city: userInfo.city || undefined,
-          gender: userInfo.gender || undefined,
+          nickname: sanitize(member.nickname) ?? undefined,
+          global_nickname: sanitize(userInfo.global_nickname) ?? undefined,
+          avatar_seq: sanitize(member.avatar_seq) ?? undefined,
+          role: sanitize(member.role) ?? undefined,
+          country: sanitize(userInfo.country) ?? undefined,
+          city: sanitize(userInfo.city) ?? undefined,
+          gender: sanitize(userInfo.gender) ?? undefined,
           join_time: joinTime ?? undefined,
-          join_time_human: member.joinTime_human ?? undefined,
+          join_time_human: sanitize(member.joinTime_human) ?? undefined,
           status: "active",
           left_at: null,
         },
