@@ -159,19 +159,19 @@ async function main() {
     }
   }
 
-  // ─── 4. 确保构建存在 ───
-  const buildIdPath = path.join(ROOT, ".next", "BUILD_ID");
-  if (!fs.existsSync(buildIdPath)) {
-    log("[4/5] 未检测到生产构建，正在构建...");
-    try {
-      run("npm run build", { stdio: "inherit", timeout: 300000 });
-      log("  ✓ 构建完成");
-    } catch (e) {
-      log("  ✗ 构建失败: " + e.message);
-      log("  → 构建失败，服务可能无法正常启动");
-    }
-  } else {
-    log("  ✓ 生产构建已存在");
+  // ─── 4. 构建（始终构建，确保使用最新代码） ───
+  log("[4/5] 构建生产版本...");
+  // 清除旧构建，避免残留旧代码
+  const buildDir = path.join(ROOT, ".next");
+  if (fs.existsSync(buildDir)) {
+    fs.rmSync(buildDir, { recursive: true, force: true });
+  }
+  try {
+    run("npm run build", { stdio: "inherit", timeout: 600000 });
+    log("  ✓ 构建完成");
+  } catch (e) {
+    log("  ✗ 构建失败: " + e.message);
+    log("  → 构建失败，服务可能无法正常启动");
   }
 
   // ─── 5. 启动 Next.js 服务（前台进程） ───
