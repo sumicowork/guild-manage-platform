@@ -467,6 +467,7 @@ export async function runUpdateCrawl(
     let consecutiveCleanPages = 0;
     const changedFeedIds: string[] = [];
     const allSeenFeedIds = new Set<string>();
+    let oldestSeenTime: number | null = null; // 扫描范围的最老帖子时间戳
 
     while (consecutiveCleanPages < 2) {
       const page = await getGuildFeeds(gid, cursor, 500, 2);
@@ -476,6 +477,12 @@ export async function runUpdateCrawl(
 
       for (const feed of page.feeds) {
         allSeenFeedIds.add(feed.feed_id);
+
+        // 跟踪扫描范围的最老时间戳（用于限定删除检测范围）
+        const feedTime = feed.create_time_raw;
+        if (typeof feedTime === "number" && (oldestSeenTime === null || feedTime < oldestSeenTime)) {
+          oldestSeenTime = feedTime;
+        }
 
         // Check if feed is new or has changed comment count
         const existing = await prisma.feed.findUnique({
@@ -572,11 +579,17 @@ export async function runUpdateCrawl(
       log(taskId, `Phase 2 complete: ${stats.commentsAdded} comments added`);
     }
 
-    // ── Phase 3: Deletion detection ──
-    log(taskId, "Phase 3: Running deletion detection...");
-    const deletions = await detectDeletions(gid, allSeenFeedIds);
-    stats["deletions"] = deletions;
-    log(taskId, `Deletions detected: ${JSON.stringify(deletions)}`);
+    // ── Phase 3: Deletion detection（仅限扫描范围内）──
+    // 只检查 create_time_raw >= oldestSeenTime 的帖子，
+    // 更老的帖子不在本次扫描范围，不做删除判断。
+    if (oldestSeenTime !== null) {
+      log(taskId, `Phase 3: Deletion detection (feeds after ${new Date(oldestSeenTime * 1000).toISOString()})...`);
+      const deletions = await detectDeletions(gid, allSeenFeedIds, oldestSeenTime);
+      stats["deletions"] = deletions;
+      log(taskId, `Deletions detected: ${JSON.stringify(deletions)}`);
+    } else {
+      log(taskId, "Phase 3: Skipped (no feeds scanned)");
+    }
 
     await updateTaskStats(taskId, { ...stats, phase: "completed" });
     await updateTaskStatus(taskId, "completed");
@@ -681,13 +694,17 @@ export async function runMemberCrawl(
  * Detects deleted feeds, comments, and members who left by comparing
  * DB active records against the latest crawl IDs.
  *
- * @param guildId       Guild ID (unused currently but reserved for multi-guild)
- * @param seenFeedIds   Set of feed IDs seen in the latest crawl. If not provided,
- *                      only checks comments whose feeds are active.
+ * @param guildId         Guild ID
+ * @param seenFeedIds     Set of feed IDs seen in the latest crawl
+ * @param oldestSeenTime  Optional: oldest create_time_raw from the scan.
+ *                        When provided, only feeds newer than this boundary
+ *                        are checked (for incremental updates where the scan
+ *                        didn't cover all feeds).
  */
 export async function detectDeletions(
   guildId: string,
-  seenFeedIds?: Set<string>
+  seenFeedIds?: Set<string>,
+  oldestSeenTime?: number
 ): Promise<{ feedsDeleted: number; commentsDeleted: number; membersLeft: number }> {
   let feedsDeleted = 0;
   let commentsDeleted = 0;
@@ -695,8 +712,14 @@ export async function detectDeletions(
 
   // Detect deleted feeds
   if (seenFeedIds && seenFeedIds.size > 0) {
+    // Build query: only check feeds within the scan time range
+    const whereClause: any = { status: "active" };
+    if (oldestSeenTime != null) {
+      whereClause.create_time_raw = { gte: BigInt(oldestSeenTime) };
+    }
+
     const activeFeeds = await prisma.feed.findMany({
-      where: { status: "active" },
+      where: whereClause,
       select: { feed_id: true },
     });
 
