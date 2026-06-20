@@ -1,0 +1,972 @@
+import { prisma } from "@/lib/db";
+import {
+  getGuildFeeds,
+  getFeedComments,
+  getFeedDetail,
+} from "@/lib/cli/feed";
+import { getGuildMembers } from "@/lib/cli/member";
+import fs from "fs";
+import path from "path";
+
+const GUILD_ID = process.env.GUILD_ID || "";
+
+// ─── Helpers ──────────────────────────────────────────────────────────
+
+/** Parse a "YYYY-MM-DD HH:mm:ss" or Unix timestamp into a Date */
+function parseDateTime(
+  raw: string | number | undefined | null
+): Date | null {
+  if (!raw) return null;
+  if (typeof raw === "number") return new Date(raw * 1000);
+  // Handle "YYYY-MM-DD HH:mm:ss" format
+  const d = new Date(raw.replace(" ", "T") + "+08:00");
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/** Safe BigInt conversion */
+function toBigInt(v: string | number | undefined | null): bigint | null {
+  if (v === undefined || v === null || v === "") return null;
+  try {
+    return BigInt(v);
+  } catch {
+    return null;
+  }
+}
+
+/** Log with task context */
+function log(taskId: bigint, msg: string): void {
+  console.log(`[Crawler][Task ${taskId}] ${msg}`);
+}
+
+/** Update the crawl_task stats column in DB */
+async function updateTaskStats(
+  taskId: bigint,
+  stats: Record<string, unknown>
+): Promise<void> {
+  await prisma.crawlTask.update({
+    where: { id: taskId },
+    data: { stats: stats as any },
+  });
+}
+
+/** Update task status */
+async function updateTaskStatus(
+  taskId: bigint,
+  status: string,
+  errorLog?: string
+): Promise<void> {
+  await prisma.crawlTask.update({
+    where: { id: taskId },
+    data: {
+      status,
+      finished_at: status === "completed" || status === "failed" ? new Date() : undefined,
+      error_log: errorLog,
+    },
+  });
+}
+
+/** Extract text content from a comment/reply content object */
+function extractContentText(content: any): string | null {
+  if (!content) return null;
+  if (typeof content === "string") return content;
+  if (typeof content === "object" && content.text) return content.text;
+  return null;
+}
+
+// ─── Upsert helpers (batch-safe) ──────────────────────────────────────
+
+async function upsertFeed(feed: any, detail?: any): Promise<void> {
+  const createTime = parseDateTime(feed.create_time);
+  const createTimeRaw = toBigInt(feed.create_time_raw);
+
+  await prisma.feed.upsert({
+    where: { feed_id: feed.feed_id },
+    create: {
+      feed_id: feed.feed_id,
+      author: feed.author ?? null,
+      author_id: feed.author_id ?? null,
+      channel_name: feed.channel_name ?? null,
+      title: feed.title ?? null,
+      content: detail?.content ?? null,
+      content_snippet: feed.content_snippet ?? null,
+      share_url: detail?.share_url ?? null,
+      images: feed.images ?? null,
+      prefer_count: feed.prefer_count ?? 0,
+      comment_count: feed.comment_count ?? 0,
+      feed_type: detail?.feed_type ?? feed.feed_type ?? null,
+      create_time: createTime,
+      create_time_raw: createTimeRaw,
+      status: "active",
+    },
+    update: {
+      author: feed.author ?? undefined,
+      author_id: feed.author_id ?? undefined,
+      channel_name: feed.channel_name ?? undefined,
+      title: feed.title ?? undefined,
+      content: detail?.content ?? undefined,
+      content_snippet: feed.content_snippet ?? undefined,
+      share_url: detail?.share_url ?? undefined,
+      images: feed.images ?? undefined,
+      prefer_count: feed.prefer_count ?? undefined,
+      comment_count: feed.comment_count ?? undefined,
+      feed_type: detail?.feed_type ?? feed.feed_type ?? undefined,
+      create_time: createTime ?? undefined,
+      create_time_raw: createTimeRaw ?? undefined,
+      // If previously marked deleted, reactivate
+      status: "active",
+      deleted_at: null,
+    },
+  });
+}
+
+async function upsertComment(comment: any, feedId: string): Promise<void> {
+  const createTime = parseDateTime(comment.create_time);
+  const createTimeRaw = toBigInt(comment.create_time_raw);
+  const contentText = extractContentText(comment.content);
+
+  await prisma.comment.upsert({
+    where: { comment_id: comment.comment_id },
+    create: {
+      comment_id: comment.comment_id,
+      feed_id: feedId,
+      author: comment.author ?? null,
+      author_id: comment.author_id ?? null,
+      content: comment.content ?? null,
+      content_text: contentText ?? comment.content_text ?? null,
+      like_count: comment.like_count ?? 0,
+      reply_count: comment.reply_count ?? 0,
+      comment_index: comment.comment_index ?? null,
+      create_time: createTime,
+      create_time_raw: createTimeRaw,
+      status: "active",
+    },
+    update: {
+      author: comment.author ?? undefined,
+      author_id: comment.author_id ?? undefined,
+      content: comment.content ?? undefined,
+      content_text: contentText ?? comment.content_text ?? undefined,
+      like_count: comment.like_count ?? undefined,
+      reply_count: comment.reply_count ?? undefined,
+      comment_index: comment.comment_index ?? undefined,
+      create_time: createTime ?? undefined,
+      create_time_raw: createTimeRaw ?? undefined,
+      status: "active",
+      deleted_at: null,
+    },
+  });
+}
+
+async function upsertReply(
+  reply: any,
+  commentId: string,
+  feedId: string
+): Promise<void> {
+  const createTime = parseDateTime(reply.create_time);
+  const createTimeRaw = toBigInt(reply.create_time_raw);
+  const contentText = extractContentText(reply.content);
+
+  await prisma.reply.upsert({
+    where: { reply_id: reply.reply_id },
+    create: {
+      reply_id: reply.reply_id,
+      comment_id: commentId,
+      feed_id: feedId,
+      author: reply.author ?? null,
+      author_id: reply.author_id ?? null,
+      content: reply.content ?? null,
+      content_text: contentText ?? null,
+      target_reply_id: reply.target_reply_id ?? null,
+      target_user: reply.target_user ?? null,
+      target_user_id: reply.target_user_id ?? null,
+      create_time: createTime,
+      create_time_raw: createTimeRaw,
+      status: "active",
+    },
+    update: {
+      author: reply.author ?? undefined,
+      author_id: reply.author_id ?? undefined,
+      content: reply.content ?? undefined,
+      content_text: contentText ?? undefined,
+      target_reply_id: reply.target_reply_id ?? undefined,
+      target_user: reply.target_user ?? undefined,
+      target_user_id: reply.target_user_id ?? undefined,
+      create_time: createTime ?? undefined,
+      create_time_raw: createTimeRaw ?? undefined,
+      status: "active",
+      deleted_at: null,
+    },
+  });
+}
+
+async function upsertMember(member: any): Promise<void> {
+  const userInfo = member._user_info || {};
+  const joinTime = parseDateTime(member.joinTime);
+
+  await prisma.member.upsert({
+    where: { tinyid: member.tinyid },
+    create: {
+      tinyid: member.tinyid,
+      nickname: member.nickname ?? null,
+      global_nickname: userInfo.global_nickname ?? null,
+      role: member.role ?? null,
+      country: userInfo.country || null,
+      city: userInfo.city || null,
+      gender: userInfo.gender || null,
+      join_time: joinTime,
+      join_time_human: member.joinTime_human ?? null,
+      status: "active",
+    },
+    update: {
+      nickname: member.nickname ?? undefined,
+      global_nickname: userInfo.global_nickname ?? undefined,
+      role: member.role ?? undefined,
+      country: userInfo.country || undefined,
+      city: userInfo.city || undefined,
+      gender: userInfo.gender || undefined,
+      join_time: joinTime ?? undefined,
+      join_time_human: member.joinTime_human ?? undefined,
+      status: "active",
+      left_at: null,
+    },
+  });
+}
+
+// ─── Full Crawl ───────────────────────────────────────────────────────
+
+/**
+ * Runs a full crawl: feeds → comments → details → members.
+ * Uses upserts so existing data is never deleted.
+ * Updates crawl_task stats periodically.
+ */
+export async function runFullCrawl(
+  guildId: string,
+  taskId: bigint
+): Promise<void> {
+  const gid = guildId || GUILD_ID;
+  log(taskId, `Starting full crawl for guild ${gid}`);
+
+  await prisma.crawlTask.update({
+    where: { id: taskId },
+    data: { status: "running", started_at: new Date() },
+  });
+
+  const stats = {
+    feedsTotal: 0,
+    commentsTotal: 0,
+    detailsTotal: 0,
+    membersTotal: 0,
+    errors: 0,
+  };
+
+  try {
+    // ── Phase 1: Feeds ──
+    log(taskId, "Phase 1: Fetching feeds...");
+    let cursor = "";
+    let pageCount = 0;
+    const allFeedIds: string[] = [];
+
+    while (true) {
+      const page = await getGuildFeeds(gid, cursor, 20, 1);
+      if (!page.feeds || page.feeds.length === 0) break;
+
+      for (const feed of page.feeds) {
+        try {
+          await upsertFeed(feed);
+          allFeedIds.push(feed.feed_id);
+          stats.feedsTotal++;
+        } catch (err) {
+          stats.errors++;
+          console.error(`[Crawler] Failed to upsert feed ${feed.feed_id}:`, err);
+        }
+      }
+
+      pageCount++;
+      if (pageCount % 10 === 0) {
+        log(taskId, `Feeds: ${stats.feedsTotal} processed (page ${pageCount})`);
+        await updateTaskStats(taskId, { ...stats, phase: "feeds" });
+      }
+
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+
+    log(taskId, `Phase 1 complete: ${stats.feedsTotal} feeds in ${pageCount} pages`);
+
+    // ── Phase 2: Comments ──
+    log(taskId, "Phase 2: Fetching comments...");
+    for (let i = 0; i < allFeedIds.length; i++) {
+      const feedId = allFeedIds[i];
+      try {
+        let commentCursor = "";
+        let commentPages = 0;
+        while (true) {
+          const commentPage = await getFeedComments(feedId, gid, commentCursor);
+          if (!commentPage.comments || commentPage.comments.length === 0) break;
+
+          for (const comment of commentPage.comments) {
+            await upsertComment(comment, feedId);
+            stats.commentsTotal++;
+
+            // Process replies nested in comments
+            if (comment.replies_preview && Array.isArray(comment.replies_preview)) {
+              for (const reply of comment.replies_preview) {
+                try {
+                  await upsertReply(reply, comment.comment_id, feedId);
+                } catch (err) {
+                  stats.errors++;
+                  console.error(`[Crawler] Failed to upsert reply ${reply.reply_id}:`, err);
+                }
+              }
+            }
+          }
+
+          commentPages++;
+          if (!commentPage.hasMore || !commentPage.nextCursor) break;
+          commentCursor = commentPage.nextCursor;
+        }
+      } catch (err) {
+        stats.errors++;
+        console.error(`[Crawler] Failed to fetch comments for feed ${feedId}:`, err);
+      }
+
+      if ((i + 1) % 50 === 0) {
+        log(taskId, `Comments: ${stats.commentsTotal} from ${i + 1}/${allFeedIds.length} feeds`);
+        await updateTaskStats(taskId, { ...stats, phase: "comments" });
+      }
+    }
+
+    log(taskId, `Phase 2 complete: ${stats.commentsTotal} comments`);
+
+    // ── Phase 3: Details ──
+    log(taskId, "Phase 3: Fetching feed details...");
+    for (let i = 0; i < allFeedIds.length; i++) {
+      const feedId = allFeedIds[i];
+      try {
+        const detail = await getFeedDetail(feedId, gid);
+        if (detail && detail.content) {
+          await prisma.feed.update({
+            where: { feed_id: feedId },
+            data: {
+              content: detail.content,
+              share_url: detail.share_url || undefined,
+              feed_type: detail.feed_type || undefined,
+            },
+          });
+          stats.detailsTotal++;
+        }
+      } catch (err) {
+        stats.errors++;
+        console.error(`[Crawler] Failed to fetch detail for feed ${feedId}:`, err);
+      }
+
+      if ((i + 1) % 100 === 0) {
+        log(taskId, `Details: ${stats.detailsTotal}/${i + 1} feeds`);
+        await updateTaskStats(taskId, { ...stats, phase: "details" });
+      }
+    }
+
+    log(taskId, `Phase 3 complete: ${stats.detailsTotal} details`);
+
+    // ── Phase 4: Members ──
+    log(taskId, "Phase 4: Fetching members...");
+    let memberCursor = "";
+    let memberPages = 0;
+    while (true) {
+      const memberPage = await getGuildMembers(gid, memberCursor, 100);
+      if (!memberPage.members || memberPage.members.length === 0) break;
+
+      for (const member of memberPage.members) {
+        try {
+          await upsertMember(member);
+          stats.membersTotal++;
+        } catch (err) {
+          stats.errors++;
+          console.error(`[Crawler] Failed to upsert member ${member.tinyid}:`, err);
+        }
+      }
+
+      memberPages++;
+      if (memberPages % 5 === 0) {
+        log(taskId, `Members: ${stats.membersTotal} (page ${memberPages})`);
+        await updateTaskStats(taskId, { ...stats, phase: "members" });
+      }
+
+      if (!memberPage.nextCursor) break;
+      memberCursor = memberPage.nextCursor;
+    }
+
+    log(taskId, `Phase 4 complete: ${stats.membersTotal} members`);
+
+    // Final stats
+    await updateTaskStats(taskId, { ...stats, phase: "completed" });
+    await updateTaskStatus(taskId, "completed");
+    log(taskId, `Full crawl completed. Stats: ${JSON.stringify(stats)}`);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error(`[Crawler] Full crawl failed:`, err);
+    await updateTaskStats(taskId, { ...stats, phase: "failed" });
+    await updateTaskStatus(taskId, "failed", errMsg);
+    throw err;
+  }
+}
+
+// ─── Update (Incremental) Crawl ──────────────────────────────────────
+
+/**
+ * Runs an incremental update crawl.
+ * - Scans feeds, detects new posts and comment_count changes.
+ * - Early terminates after 2 consecutive pages with no changes.
+ * - Fetches comments for changed feeds using 3 parallel workers.
+ * - Runs deletion detection after completion.
+ */
+export async function runUpdateCrawl(
+  guildId: string,
+  taskId: bigint
+): Promise<void> {
+  const gid = guildId || GUILD_ID;
+  log(taskId, `Starting update crawl for guild ${gid}`);
+
+  await prisma.crawlTask.update({
+    where: { id: taskId },
+    data: { status: "running", started_at: new Date() },
+  });
+
+  const stats: Record<string, any> = {
+    newFeeds: 0,
+    updatedFeeds: 0,
+    commentsAdded: 0,
+    cleanPages: 0,
+    errors: 0,
+  };
+
+  try {
+    // ── Phase 1: Scan feeds for changes ──
+    log(taskId, "Phase 1: Scanning feeds for changes...");
+    let cursor = "";
+    let consecutiveCleanPages = 0;
+    const changedFeedIds: string[] = [];
+    const allSeenFeedIds = new Set<string>();
+
+    while (consecutiveCleanPages < 2) {
+      const page = await getGuildFeeds(gid, cursor, 20, 1);
+      if (!page.feeds || page.feeds.length === 0) break;
+
+      let pageHasChanges = false;
+
+      for (const feed of page.feeds) {
+        allSeenFeedIds.add(feed.feed_id);
+
+        // Check if feed is new or has changed comment count
+        const existing = await prisma.feed.findUnique({
+          where: { feed_id: feed.feed_id },
+          select: { comment_count: true, status: true },
+        });
+
+        if (!existing) {
+          // New feed
+          await upsertFeed(feed);
+          stats.newFeeds++;
+          changedFeedIds.push(feed.feed_id);
+          pageHasChanges = true;
+        } else if (existing.comment_count !== (feed.comment_count ?? 0)) {
+          // Comment count changed — needs re-crawl of comments
+          await upsertFeed(feed);
+          stats.updatedFeeds++;
+          changedFeedIds.push(feed.feed_id);
+          pageHasChanges = true;
+        } else if (existing.status === "deleted") {
+          // Was marked deleted but now visible again
+          await upsertFeed(feed);
+          stats.updatedFeeds++;
+          pageHasChanges = true;
+        }
+      }
+
+      if (pageHasChanges) {
+        consecutiveCleanPages = 0;
+      } else {
+        consecutiveCleanPages++;
+        stats.cleanPages++;
+      }
+
+      log(
+        taskId,
+        `Feed scan: ${stats.newFeeds} new, ${stats.updatedFeeds} updated, clean pages: ${consecutiveCleanPages}`
+      );
+
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+
+    log(
+      taskId,
+      `Phase 1 complete: ${stats.newFeeds} new feeds, ${stats.updatedFeeds} changed. Fetching comments for ${changedFeedIds.length} feeds.`
+    );
+
+    // ── Phase 2: Fetch comments for changed feeds (3 workers) ──
+    if (changedFeedIds.length > 0) {
+      log(taskId, "Phase 2: Fetching comments for changed feeds...");
+      const WORKER_COUNT = 3;
+      const chunks: string[][] = Array.from({ length: WORKER_COUNT }, () => []);
+      changedFeedIds.forEach((id, i) => chunks[i % WORKER_COUNT].push(id));
+
+      const workers = chunks.map(async (chunk, workerIdx) => {
+        for (const feedId of chunk) {
+          try {
+            let commentCursor = "";
+            while (true) {
+              const commentPage = await getFeedComments(feedId, gid, commentCursor);
+              if (!commentPage.comments || commentPage.comments.length === 0) break;
+
+              for (const comment of commentPage.comments) {
+                try {
+                  await upsertComment(comment, feedId);
+                  stats.commentsAdded++;
+
+                  if (comment.replies_preview && Array.isArray(comment.replies_preview)) {
+                    for (const reply of comment.replies_preview) {
+                      try {
+                        await upsertReply(reply, comment.comment_id, feedId);
+                      } catch {
+                        stats.errors++;
+                      }
+                    }
+                  }
+                } catch {
+                  stats.errors++;
+                }
+              }
+
+              if (!commentPage.hasMore || !commentPage.nextCursor) break;
+              commentCursor = commentPage.nextCursor;
+            }
+          } catch (err) {
+            stats.errors++;
+            console.error(`[Crawler][Worker ${workerIdx}] Failed comments for ${feedId}:`, err);
+          }
+        }
+      });
+
+      await Promise.all(workers);
+      log(taskId, `Phase 2 complete: ${stats.commentsAdded} comments added`);
+    }
+
+    // ── Phase 3: Deletion detection ──
+    log(taskId, "Phase 3: Running deletion detection...");
+    const deletions = await detectDeletions(gid, allSeenFeedIds);
+    stats["deletions"] = deletions;
+    log(taskId, `Deletions detected: ${JSON.stringify(deletions)}`);
+
+    await updateTaskStats(taskId, { ...stats, phase: "completed" });
+    await updateTaskStatus(taskId, "completed");
+    log(taskId, `Update crawl completed. Stats: ${JSON.stringify(stats)}`);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error(`[Crawler] Update crawl failed:`, err);
+    await updateTaskStats(taskId, { ...stats, phase: "failed" });
+    await updateTaskStatus(taskId, "failed", errMsg);
+    throw err;
+  }
+}
+
+// ─── Member Crawl ─────────────────────────────────────────────────────
+
+/**
+ * Fetches all guild members and updates the database.
+ */
+export async function runMemberCrawl(
+  guildId: string,
+  taskId: bigint
+): Promise<void> {
+  const gid = guildId || GUILD_ID;
+  log(taskId, `Starting member crawl for guild ${gid}`);
+
+  await prisma.crawlTask.update({
+    where: { id: taskId },
+    data: { status: "running", started_at: new Date() },
+  });
+
+  const stats: Record<string, any> = { membersTotal: 0, newMembers: 0, errors: 0 };
+
+  try {
+    let cursor = "";
+    let pageCount = 0;
+    const seenTinyIds = new Set<string>();
+
+    while (true) {
+      const page = await getGuildMembers(gid, cursor, 100);
+      if (!page.members || page.members.length === 0) break;
+
+      for (const member of page.members) {
+        seenTinyIds.add(member.tinyid);
+        try {
+          const existing = await prisma.member.findUnique({
+            where: { tinyid: member.tinyid },
+            select: { id: true },
+          });
+          await upsertMember(member);
+          stats.membersTotal++;
+          if (!existing) stats.newMembers++;
+        } catch (err) {
+          stats.errors++;
+          console.error(`[Crawler] Failed to upsert member ${member.tinyid}:`, err);
+        }
+      }
+
+      pageCount++;
+      if (pageCount % 5 === 0) {
+        log(taskId, `Members: ${stats.membersTotal} (page ${pageCount})`);
+        await updateTaskStats(taskId, { ...stats, phase: "members" });
+      }
+
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+
+    // Mark members not seen in this crawl as "left"
+    const unseenMembers = await prisma.member.findMany({
+      where: {
+        tinyid: { notIn: Array.from(seenTinyIds) },
+        status: "active",
+      },
+      select: { tinyid: true },
+    });
+
+    if (unseenMembers.length > 0) {
+      const tinyIds = unseenMembers.map((m: { tinyid: string }) => m.tinyid);
+      await prisma.member.updateMany({
+        where: { tinyid: { in: tinyIds } },
+        data: { status: "left", left_at: new Date() },
+      });
+      stats["membersLeft"] = unseenMembers.length;
+      log(taskId, `Marked ${unseenMembers.length} members as left`);
+    }
+
+    await updateTaskStats(taskId, { ...stats, phase: "completed" });
+    await updateTaskStatus(taskId, "completed");
+    log(taskId, `Member crawl completed. Stats: ${JSON.stringify(stats)}`);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error(`[Crawler] Member crawl failed:`, err);
+    await updateTaskStats(taskId, { ...stats, phase: "failed" });
+    await updateTaskStatus(taskId, "failed", errMsg);
+    throw err;
+  }
+}
+
+// ─── Deletion Detection ───────────────────────────────────────────────
+
+/**
+ * Detects deleted feeds, comments, and members who left by comparing
+ * DB active records against the latest crawl IDs.
+ *
+ * @param guildId       Guild ID (unused currently but reserved for multi-guild)
+ * @param seenFeedIds   Set of feed IDs seen in the latest crawl. If not provided,
+ *                      only checks comments whose feeds are active.
+ */
+export async function detectDeletions(
+  guildId: string,
+  seenFeedIds?: Set<string>
+): Promise<{ feedsDeleted: number; commentsDeleted: number; membersLeft: number }> {
+  let feedsDeleted = 0;
+  let commentsDeleted = 0;
+  let membersLeft = 0;
+
+  // Detect deleted feeds
+  if (seenFeedIds && seenFeedIds.size > 0) {
+    const activeFeeds = await prisma.feed.findMany({
+      where: { status: "active" },
+      select: { feed_id: true },
+    });
+
+    const deletedFeedIds = activeFeeds
+      .filter((f: { feed_id: string }) => !seenFeedIds.has(f.feed_id))
+      .map((f: { feed_id: string }) => f.feed_id);
+
+    if (deletedFeedIds.length > 0) {
+      await prisma.feed.updateMany({
+        where: { feed_id: { in: deletedFeedIds } },
+        data: { status: "deleted", deleted_at: new Date() },
+      });
+      feedsDeleted = deletedFeedIds.length;
+    }
+  }
+
+  // Detect deleted comments: comments belonging to active feeds
+  // where the comment is no longer returned by the API.
+  // We check by looking at comment_count vs actual comment records.
+  const feedsWithMismatch = await prisma.$queryRaw<
+    { feed_id: string; comment_count: number; actual_count: bigint }[]
+  >`
+    SELECT f.feed_id, f.comment_count, COUNT(c.id) as actual_count
+    FROM feeds f
+    LEFT JOIN comments c ON c.feed_id = f.feed_id AND c.status = 'active'
+    WHERE f.status = 'active' AND f.comment_count > 0
+    GROUP BY f.feed_id, f.comment_count
+    HAVING COUNT(c.id) > f.comment_count
+    LIMIT 1000
+  `;
+
+  // For feeds where we have more comments in DB than the API reports,
+  // the excess comments may have been deleted. We mark the oldest excess ones.
+  for (const row of feedsWithMismatch) {
+    const excess = Number(row.actual_count) - row.comment_count;
+    if (excess <= 0) continue;
+
+    const excessComments = await prisma.comment.findMany({
+      where: { feed_id: row.feed_id, status: "active" },
+      orderBy: { create_time: "asc" },
+      take: excess,
+      select: { comment_id: true },
+    });
+
+    if (excessComments.length > 0) {
+      const ids = excessComments.map((c: { comment_id: string }) => c.comment_id);
+      await prisma.comment.updateMany({
+        where: { comment_id: { in: ids } },
+        data: { status: "deleted", deleted_at: new Date() },
+      });
+      commentsDeleted += ids.length;
+    }
+  }
+
+  // Detect members who left: active members not seen in any recent crawl
+  // (This is handled in runMemberCrawl — here we just report the count)
+  const leftMembers = await prisma.member.count({
+    where: { status: "left" },
+  });
+  membersLeft = leftMembers;
+
+  console.log(
+    `[Crawler] Deletion detection: ${feedsDeleted} feeds, ${commentsDeleted} comments, ${membersLeft} members left`
+  );
+
+  return { feedsDeleted, commentsDeleted, membersLeft };
+}
+
+// ─── JSON Import (Migration) ─────────────────────────────────────────
+
+/**
+ * Imports data from the existing JSON export files into PostgreSQL.
+ *
+ * Expected directory structure:
+ *   <jsonDir>/82203161765285899_20260528_151950.json           (main: feeds + members)
+ *   <jsonDir>/82203161765285899_20260528_151950_comments.json  (comments keyed by feed_id)
+ *   <jsonDir>/82203161765285899_20260528_151950_detail.json    (detail keyed by feed_id)
+ */
+export async function importFromJson(jsonDir: string): Promise<void> {
+  console.log(`[Import] Starting import from ${jsonDir}`);
+
+  // Locate the JSON files
+  const files = fs.readdirSync(jsonDir);
+  const mainFile = files.find((f) => f.endsWith(".json") && !f.includes("_comments") && !f.includes("_detail"));
+  const commentsFile = files.find((f) => f.includes("_comments.json"));
+  const detailFile = files.find((f) => f.includes("_detail.json"));
+
+  if (!mainFile) {
+    throw new Error(`Main JSON file not found in ${jsonDir}`);
+  }
+
+  // ── Load main file ──
+  console.log(`[Import] Loading main file: ${mainFile}`);
+  const mainData = JSON.parse(
+    fs.readFileSync(path.join(jsonDir, mainFile), "utf-8")
+  );
+
+  const feeds: any[] = mainData.feeds || [];
+  const members: any[] = mainData.members || [];
+
+  // ── Load comments file ──
+  let commentsMap: Record<string, any[]> = {};
+  if (commentsFile) {
+    console.log(`[Import] Loading comments file: ${commentsFile}`);
+    commentsMap = JSON.parse(
+      fs.readFileSync(path.join(jsonDir, commentsFile), "utf-8")
+    );
+  }
+
+  // ── Load detail file ──
+  let detailMap: Record<string, any> = {};
+  if (detailFile) {
+    console.log(`[Import] Loading detail file: ${detailFile}`);
+    detailMap = JSON.parse(
+      fs.readFileSync(path.join(jsonDir, detailFile), "utf-8")
+    );
+  }
+
+  // ── Import feeds (batch of 500) ──
+  console.log(`[Import] Importing ${feeds.length} feeds...`);
+  const BATCH = 500;
+  let imported = 0;
+
+  for (let i = 0; i < feeds.length; i += BATCH) {
+    const chunk = feeds.slice(i, i + BATCH);
+    const ops = chunk.map((feed) => {
+      const detail = detailMap[feed.feed_id] || {};
+      const createTime = parseDateTime(feed.create_time);
+      const createTimeRaw = toBigInt(feed.create_time_raw);
+
+      return prisma.feed.upsert({
+        where: { feed_id: feed.feed_id },
+        create: {
+          feed_id: feed.feed_id,
+          author: feed.author ?? null,
+          author_id: feed.author_id ?? null,
+          channel_name: feed.channel_name ?? null,
+          title: feed.title ?? null,
+          content: detail.content ?? null,
+          content_snippet: feed.content_snippet ?? null,
+          share_url: detail.share_url ?? null,
+          images: feed.images ?? null,
+          prefer_count: feed.prefer_count ?? 0,
+          comment_count: feed.comment_count ?? 0,
+          feed_type: detail.feed_type ?? null,
+          create_time: createTime,
+          create_time_raw: createTimeRaw,
+          status: "active",
+        },
+        update: {
+          content: detail.content ?? undefined,
+          share_url: detail.share_url ?? undefined,
+          feed_type: detail.feed_type ?? undefined,
+          comment_count: feed.comment_count ?? undefined,
+        },
+      });
+    });
+
+    await prisma.$transaction(ops, { maxWait: 30000, timeout: 60000 });
+    imported += chunk.length;
+    console.log(`[Import] Feeds: ${imported}/${feeds.length}`);
+  }
+
+  // ── Import comments + replies ──
+  const feedIds = Object.keys(commentsMap);
+  let totalComments = 0;
+  let totalReplies = 0;
+
+  console.log(`[Import] Importing comments for ${feedIds.length} feeds...`);
+
+  for (let i = 0; i < feedIds.length; i += BATCH) {
+    const chunkFeedIds = feedIds.slice(i, i + BATCH);
+    const commentOps: any[] = [];
+
+    for (const feedId of chunkFeedIds) {
+      const comments = commentsMap[feedId];
+      if (!Array.isArray(comments)) continue;
+
+      for (const comment of comments) {
+        const createTime = parseDateTime(comment.create_time);
+        const createTimeRaw = toBigInt(comment.create_time_raw);
+        const contentText = extractContentText(comment.content);
+
+        commentOps.push(
+          prisma.comment.upsert({
+            where: { comment_id: comment.comment_id },
+            create: {
+              comment_id: comment.comment_id,
+              feed_id: feedId,
+              author: comment.author ?? null,
+              author_id: comment.author_id ?? null,
+              content: comment.content ?? null,
+              content_text: contentText ?? comment.content_text ?? null,
+              like_count: comment.like_count ?? 0,
+              reply_count: comment.reply_count ?? 0,
+              comment_index: comment.comment_index ?? null,
+              create_time: createTime,
+              create_time_raw: createTimeRaw,
+              status: "active",
+            },
+            update: {
+              like_count: comment.like_count ?? undefined,
+              reply_count: comment.reply_count ?? undefined,
+            },
+          })
+        );
+        totalComments++;
+
+        // Process replies
+        if (comment.replies_preview && Array.isArray(comment.replies_preview)) {
+          for (const reply of comment.replies_preview) {
+            const replyCreateTime = parseDateTime(reply.create_time);
+            const replyCreateTimeRaw = toBigInt(reply.create_time_raw);
+            const replyContentText = extractContentText(reply.content);
+
+            commentOps.push(
+              prisma.reply.upsert({
+                where: { reply_id: reply.reply_id },
+                create: {
+                  reply_id: reply.reply_id,
+                  comment_id: comment.comment_id,
+                  feed_id: feedId,
+                  author: reply.author ?? null,
+                  author_id: reply.author_id ?? null,
+                  content: reply.content ?? null,
+                  content_text: replyContentText ?? null,
+                  target_reply_id: reply.target_reply_id ?? null,
+                  target_user: reply.target_user ?? null,
+                  target_user_id: reply.target_user_id ?? null,
+                  create_time: replyCreateTime,
+                  create_time_raw: replyCreateTimeRaw,
+                  status: "active",
+                },
+                update: {},
+              })
+            );
+            totalReplies++;
+          }
+        }
+      }
+    }
+
+    // Execute in sub-batches to avoid transaction limits
+    for (let j = 0; j < commentOps.length; j += BATCH) {
+      await prisma.$transaction(commentOps.slice(j, j + BATCH), {
+        maxWait: 30000,
+        timeout: 60000,
+      });
+    }
+
+    console.log(
+      `[Import] Comments: ${totalComments}, Replies: ${totalReplies} (processed ${Math.min(i + BATCH, feedIds.length)}/${feedIds.length} feeds)`
+    );
+  }
+
+  // ── Import members ──
+  console.log(`[Import] Importing ${members.length} members...`);
+  imported = 0;
+
+  for (let i = 0; i < members.length; i += BATCH) {
+    const chunk = members.slice(i, i + BATCH);
+    const ops = chunk.map((member) => {
+      const userInfo = member._user_info || {};
+      const joinTime = parseDateTime(member.joinTime);
+
+      return prisma.member.upsert({
+        where: { tinyid: member.tinyid },
+        create: {
+          tinyid: member.tinyid,
+          nickname: member.nickname ?? null,
+          global_nickname: userInfo.global_nickname ?? null,
+          country: userInfo.country || null,
+          city: userInfo.city || null,
+          gender: userInfo.gender || null,
+          join_time: joinTime,
+          join_time_human: member.joinTime_human ?? null,
+          status: "active",
+        },
+        update: {
+          nickname: member.nickname ?? undefined,
+          global_nickname: userInfo.global_nickname ?? undefined,
+        },
+      });
+    });
+
+    await prisma.$transaction(ops, { maxWait: 30000, timeout: 60000 });
+    imported += chunk.length;
+    console.log(`[Import] Members: ${imported}/${members.length}`);
+  }
+
+  console.log(
+    `[Import] Import complete. Feeds: ${feeds.length}, Comments: ${totalComments}, Replies: ${totalReplies}, Members: ${members.length}`
+  );
+}

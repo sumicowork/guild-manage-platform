@@ -1,0 +1,235 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── 帖子 ───
+model Feed {
+  id              BigInt    @id @default(autoincrement())
+  feed_id         String    @unique
+  author          String?
+  author_id       String?
+  channel_name    String?
+  title           String?
+  content         String?
+  content_snippet String?
+  share_url       String?
+  images          Json?
+  prefer_count    Int       @default(0)
+  comment_count   Int       @default(0)
+  feed_type       Int?
+  create_time     DateTime?
+  create_time_raw BigInt?
+  status          String    @default("active")
+  deleted_at      DateTime?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  comments   Comment[]
+  replies    Reply[]
+  violations Violation[] @relation("ViolationFeed")
+
+  @@index([author_id])
+  @@index([channel_name])
+  @@index([status])
+  @@index([create_time])
+  @@map("feeds")
+}
+
+// ─── 评论 ───
+model Comment {
+  id              BigInt    @id @default(autoincrement())
+  comment_id      String    @unique
+  feed_id         String
+  author          String?
+  author_id       String?
+  content         Json?
+  content_text    String?
+  like_count      Int       @default(0)
+  reply_count     Int       @default(0)
+  comment_index   Int?
+  create_time     DateTime?
+  create_time_raw BigInt?
+  status          String    @default("active")
+  deleted_at      DateTime?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  feed       Feed    @relation(fields: [feed_id], references: [feed_id])
+  replies    Reply[]
+  violations Violation[] @relation("ViolationComment")
+
+  @@index([feed_id])
+  @@index([author_id])
+  @@index([status])
+  @@map("comments")
+}
+
+// ─── 回复 ───
+model Reply {
+  id              BigInt    @id @default(autoincrement())
+  reply_id        String    @unique
+  comment_id      String
+  feed_id         String
+  author          String?
+  author_id       String?
+  content         Json?
+  content_text    String?
+  target_reply_id String?
+  target_user     String?
+  target_user_id  String?
+  create_time     DateTime?
+  create_time_raw BigInt?
+  status          String    @default("active")
+  deleted_at      DateTime?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  feed       Feed    @relation(fields: [feed_id], references: [feed_id])
+  comment    Comment @relation(fields: [comment_id], references: [comment_id])
+  violations Violation[] @relation("ViolationReply")
+
+  @@index([comment_id])
+  @@index([feed_id])
+  @@index([author_id])
+  @@index([status])
+  @@map("replies")
+}
+
+// ─── 成员 ───
+model Member {
+  id              BigInt    @id @default(autoincrement())
+  tinyid          String    @unique
+  nickname        String?
+  global_nickname String?
+  avatar_seq      String?
+  role            String?
+  country         String?
+  city            String?
+  gender          String?
+  join_time       DateTime?
+  join_time_human String?
+  status          String    @default("active")
+  left_at         DateTime?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  tags       MemberTag[]
+  violations Violation[] @relation("ViolationTarget")
+
+  @@index([status])
+  @@index([nickname])
+  @@map("members")
+}
+
+// ─── 用户标签 ───
+model MemberTag {
+  id         BigInt   @id @default(autoincrement())
+  member_id  BigInt
+  tag        String
+  created_by BigInt?
+  created_at DateTime @default(now())
+
+  member Member @relation(fields: [member_id], references: [id])
+
+  @@unique([member_id, tag])
+  @@map("member_tags")
+}
+
+// ─── 违规记录 ───
+model Violation {
+  id                  BigInt    @id @default(autoincrement())
+  target_type         String
+  target_id           String
+  target_feed_id      String?
+  target_author       String?
+  target_author_id    String?
+  violation_reason    String
+  violation_detail    String?
+  action_type         String
+  action_detail       Json?
+  notification_sent   Boolean   @default(false)
+  notification_type   String?
+  notification_text   String?
+  operator_user_id    BigInt
+  operator_admin_id   String?
+  operator_admin_name String?
+  created_at          DateTime  @default(now())
+
+  feed    Feed?    @relation("ViolationFeed", fields: [target_id], references: [feed_id], map: "violations_target_feed_fkey")
+  comment Comment? @relation("ViolationComment", fields: [target_id], references: [comment_id], map: "violations_target_comment_fkey")
+  reply   Reply?   @relation("ViolationReply", fields: [target_id], references: [reply_id], map: "violations_target_reply_fkey")
+  member  Member?  @relation("ViolationTarget", fields: [target_author_id], references: [tinyid])
+  user    PlatformUser @relation(fields: [operator_user_id], references: [id])
+
+  @@index([target_type])
+  @@index([violation_reason])
+  @@index([created_at])
+  @@index([operator_user_id])
+  @@index([target_author_id])
+  @@map("violations")
+}
+
+// ─── 违规原因配置 ───
+model ViolationReason {
+  id                    BigInt   @id @default(autoincrement())
+  name                  String   @unique
+  is_builtin            Boolean  @default(false)
+  notification_template String?
+  sort_order            Int      @default(0)
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  @@map("violation_reasons")
+}
+
+// ─── 平台用户 ───
+model PlatformUser {
+  id           BigInt   @id @default(autoincrement())
+  username     String   @unique
+  password     String
+  display_name String?
+  role         String   @default("operator")
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  violations Violation[]
+
+  @@map("platform_users")
+}
+
+// ─── 频道管理员身份 ───
+model AdminIdentity {
+  id            BigInt    @id @default(autoincrement())
+  tinyid        String    @unique
+  nickname      String
+  token         String
+  token_expires DateTime?
+  status        String    @default("active")
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  @@map("admin_identities")
+}
+
+// ─── 爬取任务 ───
+model CrawlTask {
+  id                BigInt    @id @default(autoincrement())
+  task_type         String
+  status            String    @default("pending")
+  triggered_by      String    @default("manual")
+  triggered_by_user BigInt?
+  started_at        DateTime?
+  finished_at       DateTime?
+  stats             Json?
+  error_log         String?
+  created_at        DateTime  @default(now())
+
+  @@index([status])
+  @@index([task_type])
+  @@map("crawl_tasks")
+}

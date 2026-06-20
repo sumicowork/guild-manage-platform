@@ -1,0 +1,321 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { api } from '@/lib/api-client';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { toast } from 'sonner';
+import { Loader2 } from 'lucide-react';
+
+interface ViolationReason {
+  id: number;
+  name: string;
+  builtin: boolean;
+  notificationTemplate?: string;
+}
+
+interface Channel {
+  id: string;
+  name: string;
+}
+
+interface ViolationDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  targetType: 'feed' | 'comment';
+  targetId: string;
+  targetAuthor?: string;
+  targetAuthorId?: string;
+  targetFeedId?: string;
+}
+
+export function ViolationDialog({
+  open,
+  onOpenChange,
+  targetType,
+  targetId,
+  targetAuthor,
+  targetAuthorId,
+  targetFeedId,
+}: ViolationDialogProps) {
+  const [reasons, setReasons] = useState<ViolationReason[]>([]);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [selectedReasonId, setSelectedReasonId] = useState<string>('');
+  const [detail, setDetail] = useState('');
+  const [actionType, setActionType] = useState<string>(
+    targetType === 'feed' ? 'move' : 'delete_comment'
+  );
+  const [targetChannel, setTargetChannel] = useState<string>('');
+  const [muteEnabled, setMuteEnabled] = useState(false);
+  const [muteDuration, setMuteDuration] = useState<string>('24h');
+  const [notifyEnabled, setNotifyEnabled] = useState(true);
+  const [notifyType, setNotifyType] = useState<string>('reply');
+  const [notifyContent, setNotifyContent] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      loadData();
+    }
+  }, [open]);
+
+  useEffect(() => {
+    const reason = reasons.find((r) => r.id === Number(selectedReasonId));
+    if (reason?.notificationTemplate) {
+      setNotifyContent(reason.notificationTemplate);
+    }
+  }, [selectedReasonId, reasons]);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [reasonsData, channelsData] = await Promise.all([
+        api.get<ViolationReason[]>('/violation-reasons'),
+        api.get<Channel[]>('/channels'),
+      ]);
+      setReasons(reasonsData);
+      setChannels(channelsData);
+    } catch {
+      toast.error('加载配置失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!selectedReasonId) {
+      toast.error('请选择违规原因');
+      return;
+    }
+    if (actionType === 'move' && !targetChannel) {
+      toast.error('请选择目标版块');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await api.post('/violations', {
+        targetType,
+        targetId,
+        reasonId: Number(selectedReasonId),
+        detail: detail || undefined,
+        actionType,
+        targetChannel: actionType === 'move' ? targetChannel : undefined,
+        mute: muteEnabled ? { duration: muteDuration } : undefined,
+        notification: notifyEnabled
+          ? { type: notifyType, content: notifyContent }
+          : undefined,
+        targetAuthorId,
+        targetFeedId: targetFeedId || (targetType === 'feed' ? targetId : undefined),
+      });
+      toast.success('违规处置已提交');
+      onOpenChange(false);
+      resetForm();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '提交失败');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetForm = () => {
+    setSelectedReasonId('');
+    setDetail('');
+    setActionType(targetType === 'feed' ? 'move' : 'delete_comment');
+    setTargetChannel('');
+    setMuteEnabled(false);
+    setMuteDuration('24h');
+    setNotifyEnabled(true);
+    setNotifyType('reply');
+    setNotifyContent('');
+  };
+
+  const actionOptions =
+    targetType === 'feed'
+      ? [
+          { value: 'move', label: '移帖' },
+          { value: 'delete', label: '删帖' },
+        ]
+      : [{ value: 'delete_comment', label: '删评论' }];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>标记违规</DialogTitle>
+          <DialogDescription>
+            {targetType === 'feed' ? '帖子' : '评论'} {targetId}
+            {targetAuthor && ` · ${targetAuthor}`}
+          </DialogDescription>
+        </DialogHeader>
+
+        {loading ? (
+          <div className="flex h-32 items-center justify-center">
+            <Loader2 className="size-5 animate-spin text-gray-400" />
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Violation reason */}
+            <div className="space-y-2">
+              <Label>违规原因 *</Label>
+              <Select value={selectedReasonId} onValueChange={(v) => setSelectedReasonId(v ?? '')}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="选择违规原因" />
+                </SelectTrigger>
+                <SelectContent>
+                  {reasons.map((r) => (
+                    <SelectItem key={r.id} value={String(r.id)}>
+                      {r.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Detail */}
+            <div className="space-y-2">
+              <Label>补充说明</Label>
+              <Textarea
+                placeholder="可选的详细说明..."
+                value={detail}
+                onChange={(e) => setDetail(e.target.value)}
+                rows={2}
+              />
+            </div>
+
+            {/* Action type */}
+            <div className="space-y-2">
+              <Label>处置方式</Label>
+              <div className="flex gap-2">
+                {actionOptions.map((opt) => (
+                  <Button
+                    key={opt.value}
+                    variant={actionType === opt.value ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setActionType(opt.value)}
+                    type="button"
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* Target channel for move */}
+            {actionType === 'move' && (
+              <div className="space-y-2">
+                <Label>目标版块</Label>
+                <Select value={targetChannel} onValueChange={(v) => setTargetChannel(v ?? '')}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="选择目标版块" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {channels.map((ch) => (
+                      <SelectItem key={ch.id} value={ch.id}>
+                        {ch.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Mute */}
+            <div className="flex items-center justify-between">
+              <Label>禁言</Label>
+              <Switch checked={muteEnabled} onCheckedChange={setMuteEnabled} />
+            </div>
+            {muteEnabled && (
+              <div className="space-y-2">
+                <Label>禁言时长</Label>
+                <Select value={muteDuration} onValueChange={(v) => setMuteDuration(v ?? '24h')}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="24h">24小时</SelectItem>
+                    <SelectItem value="7d">7天</SelectItem>
+                    <SelectItem value="30d">30天</SelectItem>
+                    <SelectItem value="permanent">永久</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Notification */}
+            <div className="flex items-center justify-between">
+              <Label>通知用户</Label>
+              <Switch checked={notifyEnabled} onCheckedChange={setNotifyEnabled} />
+            </div>
+            {notifyEnabled && (
+              <>
+                <div className="space-y-2">
+                  <Label>通知方式</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      variant={notifyType === 'reply' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setNotifyType('reply')}
+                      type="button"
+                    >
+                      评论回复
+                    </Button>
+                    <Button
+                      variant={notifyType === 'dm' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setNotifyType('dm')}
+                      type="button"
+                    >
+                      私信
+                    </Button>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>通知内容</Label>
+                  <Textarea
+                    value={notifyContent}
+                    onChange={(e) => setNotifyContent(e.target.value)}
+                    rows={3}
+                    placeholder="支持变量: {用户昵称}, {帖子标题}, {帖子链接}, {违规原因}"
+                  />
+                  <p className="text-xs text-gray-400">
+                    支持变量: {'{用户昵称}'}, {'{帖子标题}'}, {'{帖子链接}'}, {'{违规原因}'}
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} type="button">
+            取消
+          </Button>
+          <Button onClick={handleSubmit} disabled={submitting || loading} type="button">
+            {submitting && <Loader2 className="animate-spin" />}
+            {submitting ? '提交中...' : '确认处置'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
