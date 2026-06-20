@@ -382,3 +382,167 @@ UPDATE platform_users SET password = '\$2a\$12\$新的bcrypt哈希' WHERE userna
 | `output/*.json` | ⚠️ 单独上传 | 迁移用，放服务器 /opt/output/ |
 | `PROJECT_PROMPT.md` | ❌ | 需求文档，不需要部署 |
 | `DEPLOY.md` | ❌ | 本文档 |
+
+---
+
+### 八、容器化部署（Docker / 云原生平台）
+
+> 如果服务器使用固定的容器配置（如阿里云 SAE、腾讯云 TKE、华为云 CCE、Kubernetes 等），不能自由执行 shell 命令，推荐使用此方案。
+
+#### 8.1 方式一：Docker 构建部署（推荐）
+
+项目根目录已内置 `Dockerfile` + `entrypoint.sh` + `.dockerignore`。
+
+**构建镜像：**
+
+```bash
+# 在本地或 CI 服务器上执行
+cd /path/to/guild-platform
+
+# 如果历史 JSON 数据文件在本地，一并构建进去（可选，也可以在运行时挂载）
+mkdir -p data
+cp /path/to/82203161765285899_20260528_151950*.json data/
+
+docker build -t guild-platform:latest .
+```
+
+**推送镜像到仓库：**
+
+```bash
+docker tag guild-platform:latest 你的镜像仓库地址/guild-platform:latest
+docker push 你的镜像仓库地址/guild-platform:latest
+```
+
+**运行容器：**
+
+```bash
+docker run -d \
+  --name guild-platform \
+  -p 3000:3000 \
+  -e DATABASE_URL="postgresql://guild:密码@你的pg地址:5432/guild_platform?schema=public" \
+  -e JWT_SECRET="随机密钥" \
+  -e ENCRYPT_KEY="32位随机密钥" \
+  -e JSON_DATA_DIR="/data" \
+  -v /服务器上的json目录:/data \      # 可选：挂载历史 JSON 数据用于首次导入
+  guild-platform:latest
+```
+
+**关键说明：**
+- 容器启动后 `entrypoint.sh` 会自动执行：等待 PG → db push → 导入数据（如无数据）→ 启动服务
+- `entrypoint.sh` 的最后一步是 `exec npm start`，保持前台运行，容器不会退出
+- JSON 数据文件通过 `-v` 挂载到 `/data` 目录，首次启动时自动导入
+- 之后重启容器不会再导入（数据库已有数据时跳过）
+
+#### 8.2 方式二：单命令启动（非 Docker 容器平台）
+
+有些云平台（如 Railway、Render、Zeabur 等）只允许填写一个构建命令和一个启动命令，无法自由 SSH。
+
+**构建命令（Build Command）：**
+
+```bash
+npm ci && npx prisma generate && npm run build
+```
+
+**启动命令（Start Command）：**
+
+```bash
+node start.js
+```
+
+`start.js` 会依次：
+1. `prisma generate` + `prisma db push` — 更新数据库结构
+2. 检查 feeds 表是否为空，若是则执行 `npm run migrate` 导入历史 JSON 数据
+3. 执行 `next start` 启动服务（前台进程，保持容器存活）
+
+> 如果需要首次导入历史数据，将 JSON 文件放在项目根目录（与 `start.js` 同级），或者设置环境变量 `JSON_DATA_DIR` 指向包含 JSON 文件的目录。
+
+#### 8.3 环境变量清单
+
+所有容器平台共用的环境变量：
+
+| 变量 | 必填 | 说明 | 示例 |
+|------|------|------|------|
+| `DATABASE_URL` | ✅ | PostgreSQL 连接串 | `postgresql://user:pass@host:5432/db` |
+| `JWT_SECRET` | ✅ | JWT 签名密钥（32位随机串） | `openssl rand -hex 32` 生成 |
+| `ENCRYPT_KEY` | ✅ | Token 加密密钥（32位） | 32位随机字符 |
+| `GUILD_ID` | ❌ | 目标频道 ID | `82203161765285899` |
+| `CLI_PATH` | ❌ | tencent-channel-cli 路径 | `tencent-channel-cli` |
+| `JSON_DATA_DIR` | ❌ | JSON 数据目录（首次导入用） | `/data` |
+| `PORT` | ❌ | 服务端口（默认 3000） | `3000` |
+| `NODE_ENV` | ❌ | 环境模式 | `production` |
+
+#### 8.4 Docker Compose（一站式部署）
+
+如果服务器上可以运行 Docker Compose，这是最简单的方案。项目根目录创建 `docker-compose.yml`：
+
+```yaml
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: guild
+      POSTGRES_PASSWORD: 你的密码
+      POSTGRES_DB: guild_platform
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U guild -d guild_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    image: guild-platform:latest
+    # 或者用构建:
+    # build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://guild:你的密码@postgres:5432/guild_platform?schema=public"
+      JWT_SECRET: "${JWT_SECRET}"
+      ENCRYPT_KEY: "${ENCRYPT_KEY}"
+      GUILD_ID: "82203161765285899"
+      JSON_DATA_DIR: "/data"
+    volumes:
+      - ./data:/data   # JSON 数据目录
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+```
+
+启动：
+
+```bash
+cd /opt/guild-platform
+docker compose up -d
+```
+
+#### 8.5 启动命令执行流程图
+
+```
+容器启动
+    │
+    ▼
+entrypoint.sh / start.js
+    │
+    ├─① 等待 PostgreSQL 就绪（循环检测，最多30次）
+    │
+    ├─② npx prisma db push（创建/更新表结构）
+    │
+    ├─③ 检查 feeds 表是否有数据
+    │     ├─ 无数据 → 查找 JSON 文件 → 执行迁移导入
+    │     └─ 有数据 → 跳过导入
+    │
+    └─④ exec next start（前台进程）
+          │
+          ├─ 正常运行 → 容器保持存活
+          ├─ 进程退出 → 容器退出（平台自动重启）
+          └─ 内存不足 → OOM killed → 平台自动重启
+```

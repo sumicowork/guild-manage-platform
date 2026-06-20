@@ -1,0 +1,20 @@
+# 忽略构建产物
+node_modules/
+.next/
+src/generated/prisma/
+
+# 运行时数据
+output/
+
+# Docker
+.dockerignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

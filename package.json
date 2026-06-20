@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "start:container": "node start.js",
     "lint": "eslint",
     "migrate": "npx tsx scripts/migrate-data.ts",
     "db:push": "npx prisma db push",
