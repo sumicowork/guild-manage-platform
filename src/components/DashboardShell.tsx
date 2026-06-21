@@ -4,8 +4,6 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { api } from '@/lib/api-client';
-import { AdminSwitcher } from '@/components/AdminSwitcher';
-import { SelectedIdentityProvider, useSelectedIdentity } from '@/contexts/SelectedIdentityContext';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Separator } from '@/components/ui/separator';
@@ -40,7 +38,6 @@ interface DashboardShellProps {
 function DashboardShellInner({ children }: DashboardShellProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { selectedIdentityId, setSelectedIdentityId } = useSelectedIdentity();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleLogout = () => {
@@ -80,10 +77,6 @@ function DashboardShellInner({ children }: DashboardShellProps) {
           );
         })}
       </nav>
-      <Separator className="bg-gray-200" />
-      <div className="p-3">
-        <AdminSwitcher selectedId={selectedIdentityId} onSelect={setSelectedIdentityId} />
-      </div>
     </div>
   );
 
@@ -98,7 +91,7 @@ function DashboardShellInner({ children }: DashboardShellProps) {
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetTrigger
           render={(props) => (
-            <Button variant="ghost" size="icon" className="fixed top-3 left-3 z-40 lg:hidden" {...props}>
+            <Button {...props} variant="ghost" size="icon" className="fixed top-3 left-3 z-40 lg:hidden">
               <Menu className="size-5" />
             </Button>
           )}
@@ -112,7 +105,7 @@ function DashboardShellInner({ children }: DashboardShellProps) {
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Top bar */}
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 lg:px-6">
-          <div className="lg:hidden" /> {/* Spacer for mobile menu button */}
+          <div className="lg:hidden" />
           <div className="hidden lg:block" />
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="sm" onClick={handleLogout} className="text-gray-500 hover:text-gray-900">
@@ -132,9 +125,5 @@ function DashboardShellInner({ children }: DashboardShellProps) {
 }
 
 export function DashboardShell({ children }: DashboardShellProps) {
-  return (
-    <SelectedIdentityProvider>
-      <DashboardShellInner>{children}</DashboardShellInner>
-    </SelectedIdentityProvider>
-  );
+  return <DashboardShellInner>{children}</DashboardShellInner>;
 }

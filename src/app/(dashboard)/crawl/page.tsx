@@ -9,7 +9,18 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { RefreshCw, Download, Users, Loader2, Clock, Save } from 'lucide-react';
-import { useSelectedIdentity } from '@/contexts/SelectedIdentityContext';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+
+interface AdminIdentity {
+  id: number;
+  name: string;
+}
 
 interface CrawlTask {
   id: number;
@@ -118,7 +129,8 @@ export default function CrawlPage() {
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const { selectedIdentityId } = useSelectedIdentity();
+  const [identities, setIdentities] = useState<AdminIdentity[]>([]);
+  const [adminIdentityId, setAdminIdentityId] = useState<string>('');
 
   // Schedule state
   const [schedule, setSchedule] = useState<ScheduleInfo | null>(null);
@@ -152,6 +164,11 @@ export default function CrawlPage() {
   useEffect(() => {
     fetchTasks();
     fetchSchedule();
+    // 加载管理员身份列表
+    api.get<AdminIdentity[]>('/admin-identities').then((data) => {
+      setIdentities(data);
+      if (data.length > 0) setAdminIdentityId(String(data[0].id));
+    }).catch(() => {});
   }, [fetchTasks, fetchSchedule]);
 
   // Auto-refresh when a task is running
@@ -173,7 +190,7 @@ export default function CrawlPage() {
   const triggerTask = async (type: string) => {
     setTriggering(type);
     try {
-      await api.post('/crawl/trigger', { type, adminIdentityId: selectedIdentityId ?? undefined });
+      await api.post('/crawl/trigger', { type, adminIdentityId: adminIdentityId ? Number(adminIdentityId) : undefined });
       toast.success('任务已触发');
       fetchTasks();
     } catch (err) {
@@ -263,6 +280,18 @@ export default function CrawlPage() {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-900">爬取管理</h2>
         <div className="flex items-center gap-2">
+          <Select value={adminIdentityId} onValueChange={(v) => setAdminIdentityId(v ?? '')}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="操作身份" />
+            </SelectTrigger>
+            <SelectContent>
+              {identities.map((id) => (
+                <SelectItem key={id.id} value={String(id.id)}>
+                  {id.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             variant="outline"
             size="sm"

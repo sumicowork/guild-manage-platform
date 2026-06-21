@@ -24,7 +24,11 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
-import { useSelectedIdentity } from '@/contexts/SelectedIdentityContext';
+
+interface AdminIdentity {
+  id: number;
+  name: string;
+}
 
 interface ViolationReason {
   id: number;
@@ -72,7 +76,8 @@ export function ViolationDialog({
   const [notifyContent, setNotifyContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { selectedIdentityId } = useSelectedIdentity();
+  const [identities, setIdentities] = useState<AdminIdentity[]>([]);
+  const [adminIdentityId, setAdminIdentityId] = useState<string>('');
 
   useEffect(() => {
     if (open) {
@@ -90,12 +95,18 @@ export function ViolationDialog({
   const loadData = async () => {
     setLoading(true);
     try {
-      const [reasonsData, channelsData] = await Promise.all([
+      const [reasonsData, channelsData, identitiesData] = await Promise.all([
         api.get<ViolationReason[]>('/violation-reasons'),
         api.get<Channel[]>('/channels'),
+        api.get<AdminIdentity[]>('/admin-identities'),
       ]);
       setReasons(reasonsData);
       setChannels(channelsData);
+      setIdentities(identitiesData);
+      // 默认选中第一个身份
+      if (identitiesData.length > 0 && !adminIdentityId) {
+        setAdminIdentityId(String(identitiesData[0].id));
+      }
     } catch {
       toast.error('加载配置失败');
     } finally {
@@ -128,7 +139,7 @@ export function ViolationDialog({
           : undefined,
         targetAuthorId,
         targetFeedId: targetFeedId || (targetType === 'feed' ? targetId : undefined),
-        adminIdentityId: selectedIdentityId ?? undefined,
+        adminIdentityId: adminIdentityId ? Number(adminIdentityId) : undefined,
       });
       toast.success('违规处置已提交');
       onOpenChange(false);
@@ -177,6 +188,23 @@ export function ViolationDialog({
           </div>
         ) : (
           <div className="space-y-4">
+            {/* Admin identity */}
+            <div className="space-y-2">
+              <Label>操作身份</Label>
+              <Select value={adminIdentityId} onValueChange={(v) => setAdminIdentityId(v ?? '')}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="选择管理员身份" />
+                </SelectTrigger>
+                <SelectContent>
+                  {identities.map((id) => (
+                    <SelectItem key={id.id} value={String(id.id)}>
+                      {id.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {/* Violation reason */}
             <div className="space-y-2">
               <Label>违规原因 *</Label>

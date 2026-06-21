@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api-client';
-import { useSelectedIdentity } from '@/contexts/SelectedIdentityContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -82,7 +81,6 @@ export default function SettingsPage() {
 
   // CLI status
   const [cliStatus, setCliStatus] = useState<CliStatus | null>(null);
-  const { selectedIdentityId } = useSelectedIdentity();
   const [cliLoading, setCliLoading] = useState(true);
   const [loginDialogOpen, setLoginDialogOpen] = useState(false);
   const [loginQrData, setLoginQrData] = useState<{ authUrl: string | null; qrcodeBase64: string | null } | null>(null);
@@ -236,8 +234,8 @@ export default function SettingsPage() {
   const handlePollCliLogin = async (forIdentityId?: number | null) => {
     setLoginPolling(true);
     try {
-      // Use the explicitly passed identity; fall back to the globally selected one
-      const targetId = forIdentityId ?? selectedIdentityId;
+      // Use the explicitly passed identity; if none, token stays in default credentials
+      const targetId = forIdentityId ?? null;
       const identityParam = targetId ? `?identityId=${targetId}` : '';
       const result = await api.get<{ message: string }>('/cli/login' + identityParam);
       toast.success(result.message || 'CLI 登录成功');
