@@ -82,7 +82,6 @@ export default function SettingsPage() {
   const [identitiesLoading, setIdentitiesLoading] = useState(true);
   const [addIdentityOpen, setAddIdentityOpen] = useState(false);
   const [newIdentityName, setNewIdentityName] = useState('');
-  const [newIdentityTinyid, setNewIdentityTinyid] = useState('');
 
   // CLI status
   const [cliStatus, setCliStatus] = useState<CliStatus | null>(null);
@@ -91,6 +90,7 @@ export default function SettingsPage() {
   const [loginDialogOpen, setLoginDialogOpen] = useState(false);
   const [loginQrData, setLoginQrData] = useState<{ authUrl: string | null; qrcodeBase64: string | null } | null>(null);
   const [loginPolling, setLoginPolling] = useState(false);
+  const [loginTargetIdentityId, setLoginTargetIdentityId] = useState<number | null>(null);
 
   // Identity status
   const [identityStatuses, setIdentityStatuses] = useState<IdentityStatusItem[]>([]);
@@ -183,21 +183,21 @@ export default function SettingsPage() {
   };
 
   const handleAddIdentity = async () => {
-    if (!newIdentityName.trim() || !newIdentityTinyid.trim()) {
-      toast.error('请填写名称和 tinyid');
+    if (!newIdentityName.trim()) {
+      toast.error('请填写身份名称');
       return;
     }
     setSubmitting(true);
     try {
       await api.post('/admin-identities', {
         name: newIdentityName.trim(),
-        tinyid: newIdentityTinyid.trim(),
       });
       toast.success('管理身份已添加');
       setAddIdentityOpen(false);
       setNewIdentityName('');
-      setNewIdentityTinyid('');
       fetchIdentities();
+      // 刷新身份状态
+      fetchIdentityStatus();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '添加失败');
     } finally {
@@ -217,6 +217,7 @@ export default function SettingsPage() {
   };
 
   // Start CLI login: get QR code data
+  // If loginTargetIdentityId is set, the token will be saved to that identity after scan
   const handleStartCliLogin = async () => {
     try {
       const data = await api.post<{
@@ -238,13 +239,18 @@ export default function SettingsPage() {
   const handlePollCliLogin = async () => {
     setLoginPolling(true);
     try {
-      const identityParam = selectedIdentityId ? `?identityId=${selectedIdentityId}` : '';
+      // Use loginTargetIdentityId if set, otherwise fall back to selectedIdentityId from context
+      const targetId = loginTargetIdentityId ?? selectedIdentityId;
+      const identityParam = targetId ? `?identityId=${targetId}` : '';
       const result = await api.get<{ message: string }>('/cli/login' + identityParam);
       toast.success(result.message || 'CLI 登录成功');
       setLoginDialogOpen(false);
       setLoginQrData(null);
+      setLoginTargetIdentityId(null);
       fetchCliStatus();
+      fetchIdentityStatus();
     } catch (err) {
+      setLoginTargetIdentityId(null);
       if (err instanceof Error && err.message.includes('超时')) {
         toast.error('扫码超时，请重新登录');
       } else {
@@ -253,6 +259,12 @@ export default function SettingsPage() {
     } finally {
       setLoginPolling(false);
     }
+  };
+
+  // Start login for a specific identity
+  const handleIdentityLogin = async (identityId: number) => {
+    setLoginTargetIdentityId(identityId);
+    await handleStartCliLogin();
   };
 
   return (
@@ -429,19 +441,52 @@ export default function SettingsPage() {
                       </Badge>
                     )}
                     {item.status === 'expired' && (
-                      <Badge className="text-xs bg-red-50 text-red-600 border-red-200">
-                        已过期
-                      </Badge>
+                      <>
+                        <Badge className="text-xs bg-red-50 text-red-600 border-red-200">
+                          已过期
+                        </Badge>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          onClick={() => handleIdentityLogin(item.id)}
+                        >
+                          <ExternalLink className="size-3 mr-1" />
+                          重新登录
+                        </Button>
+                      </>
                     )}
                     {item.status === 'no_token' && (
-                      <Badge className="text-xs bg-gray-100 text-gray-500 border-gray-200">
-                        未登录
-                      </Badge>
+                      <>
+                        <Badge className="text-xs bg-gray-100 text-gray-500 border-gray-200">
+                          未登录
+                        </Badge>
+                        <Button
+                          size="sm"
+                          variant="default"
+                          className="h-7 text-xs"
+                          onClick={() => handleIdentityLogin(item.id)}
+                        >
+                          <ExternalLink className="size-3 mr-1" />
+                          扫码登录
+                        </Button>
+                      </>
                     )}
                     {item.status === 'error' && (
-                      <span className="text-xs text-yellow-600 truncate max-w-[160px]" title={item.error}>
-                        {item.error || '验证异常'}
-                      </span>
+                      <>
+                        <span className="text-xs text-yellow-600 truncate max-w-[160px]" title={item.error}>
+                          {item.error || '验证异常'}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          onClick={() => handleIdentityLogin(item.id)}
+                        >
+                          <ExternalLink className="size-3 mr-1" />
+                          重新登录
+                        </Button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -602,6 +647,7 @@ export default function SettingsPage() {
           if (!open) {
             setLoginQrData(null);
             setLoginPolling(false);
+            setLoginTargetIdentityId(null);
           }
         }}
       >
@@ -654,6 +700,7 @@ export default function SettingsPage() {
                 setLoginDialogOpen(false);
                 setLoginQrData(null);
                 setLoginPolling(false);
+                setLoginTargetIdentityId(null);
               }}
               type="button"
             >
@@ -713,14 +760,6 @@ export default function SettingsPage() {
                 value={newIdentityName}
                 onChange={(e) => setNewIdentityName(e.target.value)}
                 placeholder="身份名称"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>tinyid</Label>
-              <Input
-                value={newIdentityTinyid}
-                onChange={(e) => setNewIdentityTinyid(e.target.value)}
-                placeholder="频道账号 tinyid"
               />
             </div>
           </div>
