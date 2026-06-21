@@ -228,8 +228,8 @@ export async function deletePost(
  * Deletes a comment from a feed.
  *
  * CLI: `feed do-comment --json`
- * stdin: { feed_id, guild_id, comment_id, comment_author_id, feed_create_time, comment_type: 2 }
- * comment_type: 0=自己删自己, 2=帖主/管理员删他人评论
+ * stdin: { feed_id, guild_id, comment_id, comment_author_id, feed_create_time, comment_type: 0 }
+ * comment_type: 0=自删（管理员可用）, 2=帖主删他人评论
  */
 export async function deleteComment(
   feedId: string,
@@ -246,7 +246,7 @@ export async function deleteComment(
       comment_id: commentId,
       comment_author_id: commentAuthorId,
       feed_create_time: feedCreateTime,
-      comment_type: 2,
+      comment_type: 0,
     }, adminIdentityId);
     return true;
   } catch (err) {
