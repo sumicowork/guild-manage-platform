@@ -212,6 +212,7 @@ async function fetchAllRepliesForComment(
   feedId: string,
   comment: any,
   guildId: string,
+  channelId: string,
   onReply: (reply: any) => Promise<void>
 ): Promise<number> {
   if (!comment.has_more_replies) return 0;
@@ -230,7 +231,7 @@ async function fetchAllRepliesForComment(
         feedId,
         comment.comment_id,
         guildId,
-        guildId, // channel_id fallback to guildId, matching Python scraper
+        channelId,
         attachInfo
       );
 
@@ -342,6 +343,7 @@ export async function runFullCrawl(
     let cursor = "";
     let pageCount = 0;
     const allFeedIds: string[] = [];
+    const feedChannelMap: Record<string, string> = {}; // feed_id → channel_id
 
     while (true) {
       const page = await getGuildFeeds(gid, cursor, 20, 2);
@@ -351,6 +353,9 @@ export async function runFullCrawl(
         try {
           await upsertFeed(feed);
           allFeedIds.push(feed.feed_id);
+          if (feed.channel_id) {
+            feedChannelMap[feed.feed_id] = String(feed.channel_id);
+          }
           stats.feedsTotal++;
         } catch (err) {
           stats.errors++;
@@ -399,15 +404,19 @@ export async function runFullCrawl(
 
             // Fetch remaining sub-replies via pagination if has_more_replies
             if (comment.has_more_replies) {
-              await fetchAllRepliesForComment(
-                feedId,
-                comment,
-                gid,
-                async (reply) => {
-                  await upsertReply(reply, comment.comment_id, feedId);
-                  stats.commentsTotal++;
-                }
-              );
+              const channelId = feedChannelMap[feedId];
+              if (channelId) {
+                await fetchAllRepliesForComment(
+                  feedId,
+                  comment,
+                  gid,
+                  channelId,
+                  async (reply) => {
+                    await upsertReply(reply, comment.comment_id, feedId);
+                    stats.commentsTotal++;
+                  }
+                );
+              }
             }
           }
 
@@ -537,6 +546,7 @@ export async function runUpdateCrawl(
     let consecutiveCleanPages = 0;
     const changedFeedIds: string[] = [];
     const allSeenFeedIds = new Set<string>();
+    const feedChannelMap: Record<string, string> = {}; // feed_id → channel_id
     let oldestSeenTime: number | null = null; // 扫描范围的最老帖子时间戳
 
     while (consecutiveCleanPages < 2) {
@@ -547,6 +557,9 @@ export async function runUpdateCrawl(
 
       for (const feed of page.feeds) {
         allSeenFeedIds.add(feed.feed_id);
+        if (feed.channel_id) {
+          feedChannelMap[feed.feed_id] = String(feed.channel_id);
+        }
 
         // 跟踪扫描范围的最老时间戳（用于限定删除检测范围）
         const feedTime = feed.create_time_raw;
@@ -633,15 +646,19 @@ export async function runUpdateCrawl(
 
                   // Fetch remaining sub-replies via pagination if has_more_replies
                   if (comment.has_more_replies) {
-                    await fetchAllRepliesForComment(
-                      feedId,
-                      comment,
-                      gid,
-                      async (reply) => {
-                        await upsertReply(reply, comment.comment_id, feedId);
-                        stats.commentsAdded++;
-                      }
-                    );
+                    const channelId = feedChannelMap[feedId];
+                    if (channelId) {
+                      await fetchAllRepliesForComment(
+                        feedId,
+                        comment,
+                        gid,
+                        channelId,
+                        async (reply) => {
+                          await upsertReply(reply, comment.comment_id, feedId);
+                          stats.commentsAdded++;
+                        }
+                      );
+                    }
                   }
                 } catch {
                   stats.errors++;
