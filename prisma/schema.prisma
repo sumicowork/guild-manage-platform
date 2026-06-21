@@ -205,7 +205,6 @@ model PlatformUser {
 // ─── 频道管理员身份 ───
 model AdminIdentity {
   id            BigInt    @id @default(autoincrement())
-  tinyid        String    @unique
   nickname      String
   token         String
   token_expires DateTime?

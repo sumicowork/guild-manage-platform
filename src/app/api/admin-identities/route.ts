@@ -39,31 +39,17 @@ export async function POST(req: NextRequest) {
     if (!auth) return unauthorized();
 
     const body = await req.json();
-    const { name, tinyid, token } = body;
+    const { name, token } = body;
     const nickname = name;
 
     if (!nickname) {
       return error("缺少必要参数：name", 400);
     }
 
-    // Auto-generate tinyid if not provided
-    const finalTinyid = tinyid || `auto_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-    // Check uniqueness (only if user provided a tinyid)
-    if (tinyid) {
-      const existing = await prisma.adminIdentity.findUnique({
-        where: { tinyid },
-      });
-      if (existing) {
-        return error("该 tinyid 已存在", 409);
-      }
-    }
-
     const encryptedToken = token ? encrypt(token) : '';
 
     const identity = await prisma.adminIdentity.create({
       data: {
-        tinyid: finalTinyid,
         nickname,
         token: encryptedToken,
       },

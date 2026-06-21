@@ -17,8 +17,6 @@ import { toast } from 'sonner';
 interface AdminIdentity {
   id: number;
   name: string;
-  tinyid: string;
-  avatar?: string;
 }
 
 interface AdminSwitcherProps {
@@ -88,7 +86,6 @@ export function AdminSwitcher({ selectedId, onSelect }: AdminSwitcherProps) {
             className={selectedId === identity.id ? 'bg-accent' : ''}
           >
             <span className="truncate">{identity.name}</span>
-            <span className="ml-auto text-xs text-gray-400">{identity.tinyid}</span>
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

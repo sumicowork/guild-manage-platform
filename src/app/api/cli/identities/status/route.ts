@@ -93,7 +93,7 @@ async function checkStatus(identityId: bigint): Promise<{
  * Returns:
  *   {
  *     identities: [{
- *       id, name, tinyid,
+ *       id, name,
  *       status: "valid" | "expired" | "no_token" | "error",
  *       tokenSource: string | null,
  *       error?: string
@@ -115,7 +115,6 @@ export async function GET(req: NextRequest) {
     const results: Array<{
       id: number;
       name: string;
-      tinyid: string;
       status: "valid" | "expired" | "no_token" | "error";
       tokenSource: string | null;
       error?: string;
@@ -124,8 +123,7 @@ export async function GET(req: NextRequest) {
     for (const identity of identities) {
       const base = {
         id: Number(identity.id),
-        name: identity.nickname || identity.tinyid,
-        tinyid: identity.tinyid,
+        name: identity.nickname,
         tokenSource: null as string | null,
       };
 

@@ -30,15 +30,12 @@ interface PlatformUser {
 interface AdminIdentity {
   id: number;
   name: string;
-  tinyid: string;
-  avatar?: string;
   createdAt: string;
 }
 
 interface IdentityStatusItem {
   id: number;
   name: string;
-  tinyid: string;
   status: 'valid' | 'expired' | 'no_token' | 'error';
   tokenSource: string | null;
   error?: string;
@@ -364,7 +361,6 @@ export default function SettingsPage() {
                 >
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium text-gray-900">{identity.name}</span>
-                    <span className="font-mono text-xs text-gray-400">{identity.tinyid}</span>
                   </div>
                   <Button
                     variant="ghost"
@@ -432,7 +428,6 @@ export default function SettingsPage() {
                       }`}
                     />
                     <span className="text-sm font-medium text-gray-900 truncate">{item.name}</span>
-                    <span className="font-mono text-xs text-gray-400">{item.tinyid}</span>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {item.status === 'valid' && (
