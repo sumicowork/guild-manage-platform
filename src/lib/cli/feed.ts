@@ -42,7 +42,8 @@ export async function getGuildFeeds(
   guildId: string,
   cursor: string,
   count: number,
-  getType: number = 2
+  getType: number = 2,
+  adminIdentityId?: bigint | number | null
 ): Promise<FeedPage> {
   const body: Record<string, any> = {
     guild_id: guildId,
@@ -51,7 +52,7 @@ export async function getGuildFeeds(
   };
   if (cursor) body.feed_attach_info = cursor;
 
-  const data = await executeCli("feed", "get-guild-feeds", body);
+  const data = await executeCli("feed", "get-guild-feeds", body, adminIdentityId);
 
   if (!data) {
     return { feeds: [], nextCursor: "", hasMore: false };
@@ -77,7 +78,8 @@ export async function getGuildFeeds(
 export async function getFeedComments(
   feedId: string,
   guildId: string,
-  cursor: string
+  cursor: string,
+  adminIdentityId?: bigint | number | null
 ): Promise<CommentPage> {
   const body: Record<string, any> = {
     feed_id: feedId,
@@ -87,7 +89,7 @@ export async function getFeedComments(
   };
   if (cursor) body.attach_info = cursor;
 
-  const data = await executeCli("feed", "get-feed-comments", body);
+  const data = await executeCli("feed", "get-feed-comments", body, adminIdentityId);
 
   if (!data) {
     return { comments: [], hasMore: false, nextCursor: "" };
@@ -108,12 +110,13 @@ export async function getFeedComments(
  */
 export async function getFeedDetail(
   feedId: string,
-  guildId: string
+  guildId: string,
+  adminIdentityId?: bigint | number | null
 ): Promise<FeedDetail> {
   const data = await executeCli("feed", "get-feed-detail", {
     feed_id: feedId,
     guild_id: guildId,
-  });
+  }, adminIdentityId);
 
   if (!data) {
     return { content: "", share_url: "", feed_type: 0 };
@@ -144,7 +147,8 @@ export async function getNextPageReplies(
   commentId: string,
   guildId: string,
   channelId: string,
-  attachInfo: string
+  attachInfo: string,
+  adminIdentityId?: bigint | number | null
 ): Promise<{ replies: any[]; hasMore: boolean; nextAttachInfo: string }> {
   const data = await executeCli("feed", "get-next-page-replies", {
     feed_id: feedId,
@@ -153,7 +157,7 @@ export async function getNextPageReplies(
     channel_id: channelId,
     count: 50,
     attach_info: attachInfo,
-  });
+  }, adminIdentityId);
 
   if (!data) {
     return { replies: [], hasMore: false, nextAttachInfo: "" };
@@ -176,14 +180,15 @@ export async function movePost(
   guildId: string,
   feedId: string,
   channelId: string,
-  _originalChannelId?: string
+  _originalChannelId?: string,
+  adminIdentityId?: bigint | number | null
 ): Promise<boolean> {
   try {
     await executeCli("feed", "move-feed", {
       feed_id: feedId,
       guild_id: guildId,
       channel_id: channelId,
-    });
+    }, adminIdentityId);
     return true;
   } catch (err) {
     console.error(`[CLI] movePost failed for feed ${feedId}:`, err);
@@ -201,7 +206,8 @@ export async function deletePost(
   guildId: string,
   feedId: string,
   channelId: string,
-  createTime: string
+  createTime: string,
+  adminIdentityId?: bigint | number | null
 ): Promise<boolean> {
   try {
     await executeCli("feed", "del-feed", {
@@ -209,7 +215,7 @@ export async function deletePost(
       guild_id: guildId,
       channel_id: channelId,
       create_time: createTime,
-    });
+    }, adminIdentityId);
     return true;
   } catch (err) {
     console.error(`[CLI] deletePost failed for feed ${feedId}:`, err);
@@ -228,7 +234,8 @@ export async function deleteComment(
   guildId: string,
   commentId: string,
   commentAuthorId: string,
-  feedCreateTime: string
+  feedCreateTime: string,
+  adminIdentityId?: bigint | number | null
 ): Promise<boolean> {
   try {
     await executeCli("feed", "do-comment", {
@@ -238,7 +245,7 @@ export async function deleteComment(
       comment_author_id: commentAuthorId,
       feed_create_time: feedCreateTime,
       comment_type: 0,
-    });
+    }, adminIdentityId);
     return true;
   } catch (err) {
     console.error(`[CLI] deleteComment failed for comment ${commentId}:`, err);
@@ -256,7 +263,8 @@ export async function postComment(
   feedId: string,
   guildId: string,
   content: string,
-  feedCreateTime: string
+  feedCreateTime: string,
+  adminIdentityId?: bigint | number | null
 ): Promise<boolean> {
   try {
     await executeCli("feed", "do-comment", {
@@ -265,7 +273,7 @@ export async function postComment(
       content,
       feed_create_time: feedCreateTime,
       comment_type: 1,
-    });
+    }, adminIdentityId);
     return true;
   } catch (err) {
     console.error(`[CLI] postComment failed for feed ${feedId}:`, err);
@@ -291,7 +299,8 @@ export async function replyToComment(
     feedCreateTime: string;
     commentAuthorId: string;
     commentCreateTime: string;
-  }
+  },
+  adminIdentityId?: bigint | number | null
 ): Promise<boolean> {
   try {
     await executeCli("feed", "do-reply", {
@@ -305,7 +314,7 @@ export async function replyToComment(
       feed_create_time: extra.feedCreateTime,
       comment_author_id: extra.commentAuthorId,
       comment_create_time: extra.commentCreateTime,
-    });
+    }, adminIdentityId);
     return true;
   } catch (err) {
     console.error(

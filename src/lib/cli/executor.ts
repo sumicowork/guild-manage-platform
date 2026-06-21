@@ -1,6 +1,7 @@
 import { spawnSync } from "child_process";
 import fs from "fs";
 import path from "path";
+import { switchToIdentity, buildCliEnv } from "./credentials";
 
 // ── 限流 & 重试常量（对齐 Python scraper）──────────────────
 const MAX_RETRIES = 5;          // 最大重试次数（含 153）
@@ -92,12 +93,12 @@ interface CliResult {
   isEnoent?: boolean;
 }
 
-function executeOnce(cliPath: string, args: string[]): CliResult {
+function executeOnce(cliPath: string, args: string[], customEnv?: NodeJS.ProcessEnv): CliResult {
   const result = spawnSync(cliPath, args, {
     stdio: ["pipe", "pipe", "pipe"],
     timeout: 120_000,
     maxBuffer: 100 * 1024 * 1024,
-    env: { ...process.env },
+    env: customEnv || { ...process.env },
   });
 
   const stdout = result.stdout?.toString("utf-8") || "";
@@ -176,8 +177,17 @@ function executeOnce(cliPath: string, args: string[]): CliResult {
 export async function executeCli(
   domain: string,
   action: string,
-  params?: object
+  params?: object,
+  adminIdentityId?: bigint | number | null
 ): Promise<any> {
+  // 如果指定了管理员身份，切换凭证
+  if (adminIdentityId) {
+    await switchToIdentity(adminIdentityId);
+  }
+
+  // 构建环境变量（含凭证路径）
+  const cliEnv = buildCliEnv(adminIdentityId);
+
   // 请求间隔
   const now = Date.now();
   const elapsed = now - lastCallTime;
@@ -190,7 +200,7 @@ export async function executeCli(
   const flagArgs = params ? buildFlagArgs(params as Record<string, any>) : [];
   const args = [domain, action, ...flagArgs, "--json"];
 
-  console.log(`[CLI] ${domain} ${action}: ${args.join(" ")}`);
+  console.log(`[CLI] ${domain} ${action}: ${args.join(" ")}` + (adminIdentityId ? ` (identity=${adminIdentityId})` : ""));
 
   // Windows .cmd fallback 解析
   const resolvePath = (base: string): string => {
@@ -209,7 +219,7 @@ export async function executeCli(
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const cliPath = resolvePath(cliBase);
-    const result = executeOnce(cliPath, args);
+    const result = executeOnce(cliPath, args, cliEnv);
 
     // ENOENT → Windows .cmd 重试
     if (result.isEnoent && process.platform === "win32" && !cliPath.endsWith(".cmd")) {

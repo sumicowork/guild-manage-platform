@@ -153,6 +153,7 @@ export async function POST(req: NextRequest) {
       targetAuthorId,
       targetFeedId,
       notificationText,
+      adminIdentityId,
     } = body;
 
     // Resolve violation reason: accept either reason name (violationReason) or reasonId
@@ -282,7 +283,7 @@ export async function POST(req: NextRequest) {
     const feedCreateTimeStr = targetCreateTimeRaw ? String(targetCreateTimeRaw) : "";
 
     if (isMove && targetType === "feed" && resolvedTargetFeedId && targetChannel) {
-      const ok = await movePost(GUILD_ID, resolvedTargetFeedId, targetChannel, targetChannelName || "");
+      const ok = await movePost(GUILD_ID, resolvedTargetFeedId, targetChannel, targetChannelName || "", adminIdentityId);
       cliResults.push(ok ? "移帖成功" : "移帖失败");
       // Update feed status in DB
       if (ok) {
@@ -295,7 +296,7 @@ export async function POST(req: NextRequest) {
 
     if (isDelete) {
       if (targetType === "feed" && resolvedTargetFeedId) {
-        const ok = await deletePost(GUILD_ID, resolvedTargetFeedId, targetChannelName || "", feedCreateTimeStr);
+        const ok = await deletePost(GUILD_ID, resolvedTargetFeedId, targetChannelName || "", feedCreateTimeStr, adminIdentityId);
         cliResults.push(ok ? "删帖成功" : "删帖失败");
         if (ok) {
           await prisma.feed.update({
@@ -306,7 +307,7 @@ export async function POST(req: NextRequest) {
       } else if (targetType === "comment" && resolvedTargetFeedId && targetCommentId) {
         const ok = await deleteComment(
           resolvedTargetFeedId, GUILD_ID, targetCommentId,
-          targetCommentAuthorId || "", feedCreateTimeStr
+          targetCommentAuthorId || "", feedCreateTimeStr, adminIdentityId
         );
         cliResults.push(ok ? "删评论成功" : "删评论失败");
         if (ok) {
@@ -324,7 +325,7 @@ export async function POST(req: NextRequest) {
     if (isMute && resolvedTargetAuthorId && mute?.duration) {
       // muteUser expects expiry Unix timestamp as string (current time + duration hours)
       const expiryTimestamp = String(Math.floor(Date.now() / 1000) + Number(mute.duration) * 3600);
-      const ok = await muteUser(GUILD_ID, resolvedTargetAuthorId, expiryTimestamp);
+      const ok = await muteUser(GUILD_ID, resolvedTargetAuthorId, expiryTimestamp, adminIdentityId);
       cliResults.push(ok ? `禁言${mute.duration}h成功` : "禁言失败");
     }
 
@@ -343,9 +344,9 @@ export async function POST(req: NextRequest) {
       });
 
       if (notifType === "comment" && resolvedTargetFeedId) {
-        notificationSent = await postComment(resolvedTargetFeedId, GUILD_ID, finalText, feedCreateTimeStr);
+        notificationSent = await postComment(resolvedTargetFeedId, GUILD_ID, finalText, feedCreateTimeStr, adminIdentityId);
       } else if (notifType === "dm") {
-        notificationSent = await sendDM(GUILD_ID, resolvedTargetAuthorId, finalText);
+        notificationSent = await sendDM(GUILD_ID, resolvedTargetAuthorId, finalText, adminIdentityId);
       }
 
       // Update violation record with notification status

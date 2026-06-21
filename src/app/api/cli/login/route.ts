@@ -4,6 +4,7 @@ import { promisify } from "util";
 import fs from "fs";
 import path from "path";
 import { getAuthUser, unauthorized, forbidden, success, error } from "@/lib/api-utils";
+import { saveCurrentTokenToIdentity } from "@/lib/cli/credentials";
 
 const execFileAsync = promisify(execFile);
 
@@ -103,6 +104,9 @@ export async function POST(req: NextRequest) {
  * Runs `tencent-channel-cli login poll-token --json` which blocks until
  * the user scans the QR code and completes authorization (up to 10 min).
  *
+ * Query params:
+ *   identityId (optional) — After successful login, save the token to this AdminIdentity.
+ *
  * Response: { success: true, data: { message } } or error on failure/timeout.
  */
 export async function GET(req: NextRequest) {
@@ -110,6 +114,10 @@ export async function GET(req: NextRequest) {
     const auth = await getAuthUser(req);
     if (!auth) return unauthorized();
     if (auth.role !== "admin") return forbidden();
+
+    // Check for identityId query param
+    const { searchParams } = new URL(req.url);
+    const identityId = searchParams.get("identityId");
 
     // poll-token blocks for up to 10 minutes waiting for scan
     const result = await runCliJson(["login", "poll-token", "--json"], 600000);
@@ -119,6 +127,16 @@ export async function GET(req: NextRequest) {
         result?.error?.message || "扫码授权未完成",
         400
       );
+    }
+
+    // ── 登录成功后提取 token 并保存 ──
+    if (identityId) {
+      try {
+        await saveCurrentTokenToIdentity(BigInt(identityId));
+      } catch (saveErr) {
+        console.error("Failed to save token after login:", saveErr);
+        // Don't fail the login response — token save is best-effort
+      }
     }
 
     return success({

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { api } from '@/lib/api-client';
 import { AdminSwitcher } from '@/components/AdminSwitcher';
+import { SelectedIdentityProvider, useSelectedIdentity } from '@/contexts/SelectedIdentityContext';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Separator } from '@/components/ui/separator';
@@ -36,10 +37,10 @@ interface DashboardShellProps {
   children: React.ReactNode;
 }
 
-export function DashboardShell({ children }: DashboardShellProps) {
+function DashboardShellInner({ children }: DashboardShellProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const [selectedIdentityId, setSelectedIdentityId] = useState<number | null>(null);
+  const { selectedIdentityId, setSelectedIdentityId } = useSelectedIdentity();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleLogout = () => {
@@ -127,5 +128,13 @@ export function DashboardShell({ children }: DashboardShellProps) {
         </main>
       </div>
     </div>
+  );
+}
+
+export function DashboardShell({ children }: DashboardShellProps) {
+  return (
+    <SelectedIdentityProvider>
+      <DashboardShellInner>{children}</DashboardShellInner>
+    </SelectedIdentityProvider>
   );
 }

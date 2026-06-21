@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api-client';
+import { useSelectedIdentity } from '@/contexts/SelectedIdentityContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -32,6 +33,20 @@ interface AdminIdentity {
   tinyid: string;
   avatar?: string;
   createdAt: string;
+}
+
+interface IdentityStatusItem {
+  id: number;
+  name: string;
+  tinyid: string;
+  status: 'valid' | 'expired' | 'no_token' | 'error';
+  tokenSource: string | null;
+  error?: string;
+}
+
+interface IdentityStatusResponse {
+  identities: IdentityStatusItem[];
+  summary: { valid: number; expired: number; noToken: number; error: number };
 }
 
 interface CliCheck {
@@ -71,10 +86,16 @@ export default function SettingsPage() {
 
   // CLI status
   const [cliStatus, setCliStatus] = useState<CliStatus | null>(null);
+  const { selectedIdentityId } = useSelectedIdentity();
   const [cliLoading, setCliLoading] = useState(true);
   const [loginDialogOpen, setLoginDialogOpen] = useState(false);
   const [loginQrData, setLoginQrData] = useState<{ authUrl: string | null; qrcodeBase64: string | null } | null>(null);
   const [loginPolling, setLoginPolling] = useState(false);
+
+  // Identity status
+  const [identityStatuses, setIdentityStatuses] = useState<IdentityStatusItem[]>([]);
+  const [identitySummary, setIdentitySummary] = useState({ valid: 0, expired: 0, noToken: 0, error: 0 });
+  const [identityStatusLoading, setIdentityStatusLoading] = useState(false);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -110,11 +131,25 @@ export default function SettingsPage() {
     }
   }, []);
 
+  const fetchIdentityStatus = useCallback(async () => {
+    setIdentityStatusLoading(true);
+    try {
+      const data = await api.get<IdentityStatusResponse>('/cli/identities/status');
+      setIdentityStatuses(data.identities);
+      setIdentitySummary(data.summary);
+    } catch {
+      toast.error('获取身份状态失败');
+    } finally {
+      setIdentityStatusLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchUsers();
     fetchIdentities();
     fetchCliStatus();
-  }, [fetchUsers, fetchIdentities, fetchCliStatus]);
+    fetchIdentityStatus();
+  }, [fetchUsers, fetchIdentities, fetchCliStatus, fetchIdentityStatus]);
 
   const handleAddUser = async () => {
     if (!newUsername.trim() || !newPassword.trim()) {
@@ -203,7 +238,8 @@ export default function SettingsPage() {
   const handlePollCliLogin = async () => {
     setLoginPolling(true);
     try {
-      const result = await api.get<{ message: string }>('/cli/login');
+      const identityParam = selectedIdentityId ? `?identityId=${selectedIdentityId}` : '';
+      const result = await api.get<{ message: string }>('/cli/login' + identityParam);
       toast.success(result.message || 'CLI 登录成功');
       setLoginDialogOpen(false);
       setLoginQrData(null);
@@ -327,6 +363,98 @@ export default function SettingsPage() {
                   </Button>
                 </div>
               ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Identity Status */}
+      <Card className="bg-white border-gray-200">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Shield className="size-4 text-gray-500" />
+              <div>
+                <CardTitle className="text-sm">身份有效状态</CardTitle>
+                <CardDescription>逐一验证各管理员凭证是否可用</CardDescription>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchIdentityStatus}
+              disabled={identityStatusLoading}
+            >
+              {identityStatusLoading ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="size-3.5" />
+              )}
+              验证全部
+            </Button>
+          </div>
+        </CardHeader>
+        <Separator className="bg-gray-200" />
+        <CardContent className="pt-4">
+          {identityStatusLoading && identityStatuses.length === 0 ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-10 rounded-lg bg-gray-200" />
+              ))}
+            </div>
+          ) : identityStatuses.length === 0 ? (
+            <p className="text-sm text-gray-400">暂无管理身份，请先添加</p>
+          ) : (
+            <div className="space-y-2">
+              {identityStatuses.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between rounded-lg bg-gray-100 px-3 py-2.5"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span
+                      className={`inline-block size-2 shrink-0 rounded-full ${
+                        item.status === 'valid' ? 'bg-green-500' :
+                        item.status === 'expired' || item.status === 'no_token' ? 'bg-red-500' :
+                        'bg-yellow-500'
+                      }`}
+                    />
+                    <span className="text-sm font-medium text-gray-900 truncate">{item.name}</span>
+                    <span className="font-mono text-xs text-gray-400">{item.tinyid}</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {item.status === 'valid' && (
+                      <Badge className="text-xs bg-green-50 text-green-600 border-green-200">
+                        {item.tokenSource === 'dotenv' ? '凭证文件' : '已认证'}
+                      </Badge>
+                    )}
+                    {item.status === 'expired' && (
+                      <Badge className="text-xs bg-red-50 text-red-600 border-red-200">
+                        已过期
+                      </Badge>
+                    )}
+                    {item.status === 'no_token' && (
+                      <Badge className="text-xs bg-gray-100 text-gray-500 border-gray-200">
+                        未登录
+                      </Badge>
+                    )}
+                    {item.status === 'error' && (
+                      <span className="text-xs text-yellow-600 truncate max-w-[160px]" title={item.error}>
+                        {item.error || '验证异常'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {/* Summary row */}
+              <div className="pt-2 flex items-center gap-3 text-xs text-gray-400">
+                <span>有效 <strong className="text-green-600">{identitySummary.valid}</strong></span>
+                <span>过期 <strong className="text-red-600">{identitySummary.expired}</strong></span>
+                <span>未登录 <strong className="text-gray-500">{identitySummary.noToken}</strong></span>
+                {identitySummary.error > 0 && (
+                  <span>异常 <strong className="text-yellow-600">{identitySummary.error}</strong></span>
+                )}
+              </div>
             </div>
           )}
         </CardContent>

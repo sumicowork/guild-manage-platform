@@ -31,7 +31,8 @@ export interface MemberSearchResult {
 export async function getGuildMembers(
   guildId: string,
   cursor: string = "",
-  _count: number = 50
+  _count: number = 50,
+  adminIdentityId?: bigint | number | null
 ): Promise<MemberPage> {
   const body: Record<string, any> = {
     guild_id: guildId,
@@ -40,7 +41,7 @@ export async function getGuildMembers(
   };
   if (cursor) body.next_pos = cursor;
 
-  const data = await executeCli("manage", "guild-member-search", body);
+  const data = await executeCli("manage", "guild-member-search", body, adminIdentityId);
 
   if (!data) {
     return { members: [], nextPos: "", hasMore: false };
@@ -62,7 +63,8 @@ export async function getGuildMembers(
 export async function searchMembers(
   guildId: string,
   keyword: string,
-  cursor: string = ""
+  cursor: string = "",
+  adminIdentityId?: bigint | number | null
 ): Promise<MemberSearchResult> {
   const body: Record<string, any> = {
     guild_id: guildId,
@@ -70,7 +72,7 @@ export async function searchMembers(
   };
   if (cursor) body.next_pos = cursor;
 
-  const data = await executeCli("manage", "guild-member-search", body);
+  const data = await executeCli("manage", "guild-member-search", body, adminIdentityId);
 
   if (!data) {
     return { members: [], nextPos: "" };
@@ -94,14 +96,15 @@ export async function searchMembers(
  */
 export async function getUserInfo(
   tinyId: string,
-  guildId?: string
+  guildId?: string,
+  adminIdentityId?: bigint | number | null
 ): Promise<any> {
   const body: Record<string, any> = {
     tiny_id: tinyId,
   };
   if (guildId) body.guild_id = guildId;
 
-  return await executeCli("manage", "get-user-info", body);
+  return await executeCli("manage", "get-user-info", body, adminIdentityId);
 }
 
 /**
@@ -117,14 +120,15 @@ export async function getUserInfo(
 export async function muteUser(
   guildId: string,
   tinyId: string,
-  timestamp: string
+  timestamp: string,
+  adminIdentityId?: bigint | number | null
 ): Promise<boolean> {
   try {
     await executeCli("manage", "modify-member-shut-up", {
       guild_id: guildId,
       tiny_id: tinyId,
       time_stamp: timestamp,
-    });
+    }, adminIdentityId);
     return true;
   } catch (err) {
     console.error(`[CLI] muteUser failed for ${tinyId}:`, err);
@@ -140,13 +144,14 @@ export async function muteUser(
  */
 export async function kickUser(
   guildId: string,
-  tinyId: string
+  tinyId: string,
+  adminIdentityId?: bigint | number | null
 ): Promise<boolean> {
   try {
     await executeCli("manage", "kick-guild-member", {
       guild_id: guildId,
       tiny_id: tinyId,
-    });
+    }, adminIdentityId);
     return true;
   } catch (err) {
     console.error(`[CLI] kickUser failed for ${tinyId}:`, err);
@@ -163,14 +168,15 @@ export async function kickUser(
 export async function sendDM(
   guildId: string,
   tinyId: string,
-  content: string
+  content: string,
+  adminIdentityId?: bigint | number | null
 ): Promise<boolean> {
   try {
     await executeCli("manage", "push-group-dm-msg", {
       peer_tiny_id: tinyId,
       source_guild_id: guildId,
       text: content,
-    });
+    }, adminIdentityId);
     return true;
   } catch (err) {
     console.error(`[CLI] sendDM failed for ${tinyId}:`, err);

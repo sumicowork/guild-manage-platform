@@ -213,7 +213,8 @@ async function fetchAllRepliesForComment(
   comment: any,
   guildId: string,
   channelId: string,
-  onReply: (reply: any) => Promise<void>
+  onReply: (reply: any) => Promise<void>,
+  adminIdentityId?: number
 ): Promise<number> {
   if (!comment.has_more_replies) return 0;
 
@@ -232,7 +233,8 @@ async function fetchAllRepliesForComment(
         comment.comment_id,
         guildId,
         channelId,
-        attachInfo
+        attachInfo,
+        adminIdentityId
       );
 
       if (result.replies && result.replies.length > 0) {
@@ -319,7 +321,8 @@ async function upsertMember(rawMember: any): Promise<void> {
  */
 export async function runFullCrawl(
   guildId: string,
-  taskId: bigint
+  taskId: bigint,
+  adminIdentityId?: number
 ): Promise<void> {
   const gid = guildId || GUILD_ID;
   log(taskId, `Starting full crawl for guild ${gid}`);
@@ -346,7 +349,7 @@ export async function runFullCrawl(
     const feedChannelMap: Record<string, string> = {}; // feed_id → channel_id
 
     while (true) {
-      const page = await getGuildFeeds(gid, cursor, 20, 2);
+      const page = await getGuildFeeds(gid, cursor, 20, 2, adminIdentityId);
       if (!page.feeds || page.feeds.length === 0) break;
 
       for (const feed of page.feeds) {
@@ -383,7 +386,7 @@ export async function runFullCrawl(
         let commentCursor = "";
         let commentPages = 0;
         while (true) {
-          const commentPage = await getFeedComments(feedId, gid, commentCursor);
+          const commentPage = await getFeedComments(feedId, gid, commentCursor, adminIdentityId);
           if (!commentPage.comments || commentPage.comments.length === 0) break;
 
           for (const comment of commentPage.comments) {
@@ -414,7 +417,8 @@ export async function runFullCrawl(
                   async (reply) => {
                     await upsertReply(reply, comment.comment_id, feedId);
                     stats.commentsTotal++;
-                  }
+                  },
+                  adminIdentityId
                 );
               }
             }
@@ -442,7 +446,7 @@ export async function runFullCrawl(
     for (let i = 0; i < allFeedIds.length; i++) {
       const feedId = allFeedIds[i];
       try {
-        const detail = await getFeedDetail(feedId, gid);
+        const detail = await getFeedDetail(feedId, gid, adminIdentityId);
         if (detail && detail.content) {
           await prisma.feed.update({
             where: { feed_id: feedId },
@@ -472,7 +476,7 @@ export async function runFullCrawl(
     let memberCursor = "";
     let memberPages = 0;
     while (true) {
-      const memberPage = await getGuildMembers(gid, memberCursor, 100);
+      const memberPage = await getGuildMembers(gid, memberCursor, 100, adminIdentityId);
       if (!memberPage.members || memberPage.members.length === 0) break;
 
       for (const member of memberPage.members) {
@@ -521,7 +525,8 @@ export async function runFullCrawl(
  */
 export async function runUpdateCrawl(
   guildId: string,
-  taskId: bigint
+  taskId: bigint,
+  adminIdentityId?: number
 ): Promise<void> {
   const gid = guildId || GUILD_ID;
   log(taskId, `Starting update crawl for guild ${gid}`);
@@ -550,8 +555,7 @@ export async function runUpdateCrawl(
     let oldestSeenTime: number | null = null; // 扫描范围的最老帖子时间戳
 
     while (consecutiveCleanPages < 2) {
-      const page = await getGuildFeeds(gid, cursor, 500, 2);
-      if (!page.feeds || page.feeds.length === 0) break;
+      const page = await getGuildFeeds(gid, cursor, 500, 2, adminIdentityId);
 
       let pageHasChanges = false;
 
@@ -626,7 +630,7 @@ export async function runUpdateCrawl(
           try {
             let commentCursor = "";
             while (true) {
-              const commentPage = await getFeedComments(feedId, gid, commentCursor);
+              const commentPage = await getFeedComments(feedId, gid, commentCursor, adminIdentityId);
               if (!commentPage.comments || commentPage.comments.length === 0) break;
 
               for (const comment of commentPage.comments) {
@@ -656,7 +660,8 @@ export async function runUpdateCrawl(
                         async (reply) => {
                           await upsertReply(reply, comment.comment_id, feedId);
                           stats.commentsAdded++;
-                        }
+                        },
+                        adminIdentityId
                       );
                     }
                   }
@@ -710,7 +715,8 @@ export async function runUpdateCrawl(
  */
 export async function runMemberCrawl(
   guildId: string,
-  taskId: bigint
+  taskId: bigint,
+  adminIdentityId?: number
 ): Promise<void> {
   const gid = guildId || GUILD_ID;
   log(taskId, `Starting member crawl for guild ${gid}`);
@@ -728,7 +734,7 @@ export async function runMemberCrawl(
     const seenTinyIds = new Set<string>();
 
     while (true) {
-      const page = await getGuildMembers(gid, cursor, 100);
+      const page = await getGuildMembers(gid, cursor, 100, adminIdentityId);
       if (!page.members || page.members.length === 0) break;
 
       for (const member of page.members) {

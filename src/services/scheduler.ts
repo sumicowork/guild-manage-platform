@@ -36,12 +36,14 @@ const runningTasks: Record<string, boolean> = {
  * @param type         Crawl type: 'full' | 'update' | 'members'
  * @param triggeredBy  'manual' or 'cron'
  * @param userId       Optional platform user ID who triggered it
+ * @param adminIdentityId  Optional admin identity ID for CLI credential switching
  * @returns The created task's BigInt ID
  */
 export async function triggerCrawl(
   type: "full" | "update" | "members",
   triggeredBy: "manual" | "cron",
-  userId?: number
+  userId?: number,
+  adminIdentityId?: number
 ): Promise<bigint> {
   // Prevent concurrent crawls of the same type
   if (runningTasks[type]) {
@@ -73,13 +75,13 @@ export async function triggerCrawl(
     try {
       switch (type) {
         case "full":
-          await runFullCrawl(guildId, taskId);
+          await runFullCrawl(guildId, taskId, adminIdentityId);
           break;
         case "update":
-          await runUpdateCrawl(guildId, taskId);
+          await runUpdateCrawl(guildId, taskId, adminIdentityId);
           break;
         case "members":
-          await runMemberCrawl(guildId, taskId);
+          await runMemberCrawl(guildId, taskId, adminIdentityId);
           break;
       }
     } catch (err) {

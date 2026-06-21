@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { type } = body;
+    const { type, adminIdentityId } = body;
     // Map client values: "incremental" → "update"
     const taskType = type === "incremental" ? "update" : type;
 
@@ -33,7 +33,8 @@ export async function POST(req: NextRequest) {
     const taskId = await triggerCrawl(
       taskType as "full" | "update" | "members",
       "manual",
-      Number(auth.userId)
+      Number(auth.userId),
+      adminIdentityId ? Number(adminIdentityId) : undefined
     );
 
     // Fetch the created task to return

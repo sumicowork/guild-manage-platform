@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
+import { useSelectedIdentity } from '@/contexts/SelectedIdentityContext';
 
 interface ViolationReason {
   id: number;
@@ -71,6 +72,7 @@ export function ViolationDialog({
   const [notifyContent, setNotifyContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(false);
+  const { selectedIdentityId } = useSelectedIdentity();
 
   useEffect(() => {
     if (open) {
@@ -126,6 +128,7 @@ export function ViolationDialog({
           : undefined,
         targetAuthorId,
         targetFeedId: targetFeedId || (targetType === 'feed' ? targetId : undefined),
+        adminIdentityId: selectedIdentityId ?? undefined,
       });
       toast.success('违规处置已提交');
       onOpenChange(false);

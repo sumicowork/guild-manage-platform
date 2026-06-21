@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { RefreshCw, Download, Users, Loader2, Clock, Save } from 'lucide-react';
+import { useSelectedIdentity } from '@/contexts/SelectedIdentityContext';
 
 interface CrawlTask {
   id: number;
@@ -117,6 +118,7 @@ export default function CrawlPage() {
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { selectedIdentityId } = useSelectedIdentity();
 
   // Schedule state
   const [schedule, setSchedule] = useState<ScheduleInfo | null>(null);
@@ -171,7 +173,7 @@ export default function CrawlPage() {
   const triggerTask = async (type: string) => {
     setTriggering(type);
     try {
-      await api.post('/crawl/trigger', { type });
+      await api.post('/crawl/trigger', { type, adminIdentityId: selectedIdentityId ?? undefined });
       toast.success('任务已触发');
       fetchTasks();
     } catch (err) {
