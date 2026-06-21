@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
 import type { Prisma } from "@/generated/prisma/client";
-import { movePost, deletePost, deleteComment, postComment } from "@/lib/cli/feed";
+import { movePost, deletePost, deleteComment, deleteReply, postComment } from "@/lib/cli/feed";
 import { muteUser, kickUser, sendDM } from "@/lib/cli/member";
 
 const GUILD_ID = process.env.GUILD_ID || "82203161765285899";
@@ -165,6 +165,8 @@ export async function POST(req: NextRequest) {
     let targetChannelName: string | null = null;
     let targetCreateTimeRaw: bigint | null = null;
     let targetCommentAuthorId: string | null = null;
+    let targetFeedAuthorId: string | null = null;
+    let targetCommentCreateTimeRaw: bigint | null = null;
 
     if (targetType === "feed") {
       const feed = await prisma.feed.findUnique({
@@ -202,8 +204,8 @@ export async function POST(req: NextRequest) {
       const reply = await prisma.reply.findUnique({
         where: { reply_id: targetId },
         include: {
-          comment: true,
-          feed: { select: { feed_id: true, title: true, share_url: true, channel_name: true, create_time_raw: true } },
+          comment: { select: { author_id: true, create_time_raw: true } },
+          feed: { select: { feed_id: true, author_id: true, title: true, share_url: true, channel_name: true, create_time_raw: true } },
         },
       });
       if (reply) {
@@ -215,6 +217,9 @@ export async function POST(req: NextRequest) {
         targetShareUrl = reply.feed?.share_url || "";
         targetChannelName = reply.feed?.channel_name;
         targetCreateTimeRaw = reply.feed?.create_time_raw;
+        targetFeedAuthorId = reply.feed?.author_id || null;
+        targetCommentAuthorId = reply.comment?.author_id || null;
+        targetCommentCreateTimeRaw = reply.comment?.create_time_raw ?? null;
       }
     }
 
@@ -310,8 +315,26 @@ export async function POST(req: NextRequest) {
           });
         }
       } else if (targetType === "reply") {
-        // Reply deletion not supported by CLI yet, only record in DB
-        cliResults.push("回复删除：仅记录（CLI暂不支持）");
+        const commentCreateTimeStr = targetCommentCreateTimeRaw ? String(targetCommentCreateTimeRaw) : "";
+        const ok = await deleteReply(
+          resolvedTargetFeedId || "", GUILD_ID, targetCommentId || "",
+          targetId,
+          {
+            feedAuthorId: targetFeedAuthorId || "",
+            feedCreateTime: feedCreateTimeStr,
+            commentAuthorId: targetCommentAuthorId || "",
+            commentCreateTime: commentCreateTimeStr,
+            channelId: targetChannelName || undefined,
+          },
+          adminIdentityId
+        );
+        cliResults.push(ok ? "删回复成功" : "删回复失败");
+        if (ok) {
+          await prisma.reply.update({
+            where: { reply_id: targetId },
+            data: { status: "deleted", deleted_at: new Date() },
+          });
+        }
       }
     }
 

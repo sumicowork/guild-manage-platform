@@ -288,6 +288,52 @@ export async function postComment(
  * stdin: { feed_id, guild_id, comment_id, content, reply_type: 1, replier_id,
  *          feed_author_id, feed_create_time, comment_author_id, comment_create_time }
  */
+/**
+ * Deletes a reply from a comment thread.
+ *
+ * CLI: `feed do-reply --json --reply-type 2`
+ * reply_type 2 = 帖主/管理员删除他人回复
+ *
+ * 必填: feed_id, feed_author_id, feed_create_time,
+ *       comment_id, comment_author_id, comment_create_time,
+ *       reply_id, replier_id (操作者=帖主), guild_id
+ * 建议: channel_id
+ */
+export async function deleteReply(
+  feedId: string,
+  guildId: string,
+  commentId: string,
+  replyId: string,
+  extra: {
+    feedAuthorId: string;
+    feedCreateTime: string;
+    commentAuthorId: string;
+    commentCreateTime: string;
+    channelId?: string;
+  },
+  adminIdentityId?: bigint | number | null
+): Promise<boolean> {
+  try {
+    await executeCli("feed", "do-reply", {
+      reply_type: 2,
+      feed_id: feedId,
+      feed_author_id: extra.feedAuthorId,
+      feed_create_time: extra.feedCreateTime,
+      comment_id: commentId,
+      comment_author_id: extra.commentAuthorId,
+      comment_create_time: extra.commentCreateTime,
+      reply_id: replyId,
+      replier_id: extra.feedAuthorId,
+      guild_id: guildId,
+      channel_id: extra.channelId || undefined,
+    }, adminIdentityId);
+    return true;
+  } catch (err) {
+    console.error(`[CLI] deleteReply failed for reply ${replyId}:`, err);
+    return false;
+  }
+}
+
 export async function replyToComment(
   feedId: string,
   guildId: string,
