@@ -97,11 +97,11 @@ function DashboardShellInner({ children }: DashboardShellProps) {
       {/* Mobile sidebar */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetTrigger
-          render={
-            <Button variant="ghost" size="icon" className="fixed top-3 left-3 z-40 lg:hidden">
+          render={(props) => (
+            <Button variant="ghost" size="icon" className="fixed top-3 left-3 z-40 lg:hidden" {...props}>
               <Menu className="size-5" />
             </Button>
-          }
+          )}
         />
         <SheetContent side="left" className="w-56 border-gray-200 bg-white p-0">
           <SidebarContent />
