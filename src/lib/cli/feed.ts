@@ -180,7 +180,7 @@ export async function movePost(
   guildId: string,
   feedId: string,
   channelId: string,
-  _originalChannelId?: string,
+  originalChannelId: string,
   adminIdentityId?: bigint | number | null
 ): Promise<boolean> {
   try {
@@ -188,6 +188,7 @@ export async function movePost(
       feed_id: feedId,
       guild_id: guildId,
       channel_id: channelId,
+      original_channel_id: originalChannelId,
     }, adminIdentityId);
     return true;
   } catch (err) {
@@ -227,7 +228,8 @@ export async function deletePost(
  * Deletes a comment from a feed.
  *
  * CLI: `feed do-comment --json`
- * stdin: { feed_id, guild_id, comment_id, comment_author_id, feed_create_time, comment_type: 0 }
+ * stdin: { feed_id, guild_id, comment_id, comment_author_id, feed_create_time, comment_type: 2 }
+ * comment_type: 0=自己删自己, 2=帖主/管理员删他人评论
  */
 export async function deleteComment(
   feedId: string,
@@ -244,7 +246,7 @@ export async function deleteComment(
       comment_id: commentId,
       comment_author_id: commentAuthorId,
       feed_create_time: feedCreateTime,
-      comment_type: 0,
+      comment_type: 2,
     }, adminIdentityId);
     return true;
   } catch (err) {
