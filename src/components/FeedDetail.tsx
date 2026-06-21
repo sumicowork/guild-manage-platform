@@ -248,6 +248,7 @@ export function FeedDetail({
                     key={i}
                     src={img}
                     alt={`图片 ${i + 1}`}
+                    referrerPolicy="no-referrer"
                     className="aspect-square rounded-lg object-cover ring-1 ring-gray-200"
                   />
                 ))}
