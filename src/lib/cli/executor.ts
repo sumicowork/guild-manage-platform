@@ -11,7 +11,7 @@ const RATE_LIMIT_WAIT_S = 30;  // 153 基础等待时间（秒）
 let _global153Count = 0;
 
 // ── 请求间隔 ─────────────────────────────────────────────
-const REQUEST_DELAY_MS = Number(process.env.CLI_REQUEST_DELAY_MS) || 500;
+const REQUEST_DELAY_MS = Number(process.env.CLI_REQUEST_DELAY_MS) || 1500;
 let lastCallTime = 0;
 
 function delay(ms: number): Promise<void> {
