@@ -235,11 +235,11 @@ export default function MembersPage() {
           ))}
           <DropdownMenu>
             <DropdownMenuTrigger
-              render={
-                <Button variant="ghost" size="icon-xs" onClick={(e) => e.stopPropagation()}>
+              render={(props) => (
+                <Button {...props} variant="ghost" size="icon-xs" onClick={(e) => e.stopPropagation()}>
                   <Plus className="size-3" />
                 </Button>
-              }
+              )}
             />
             <DropdownMenuContent align="start">
               <DropdownMenuLabel>添加标签</DropdownMenuLabel>
