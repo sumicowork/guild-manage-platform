@@ -31,6 +31,7 @@ model Feed {
 
   comments   Comment[]
   replies    Reply[]
+  violations Violation[] @relation("ViolationFeed")
 
   @@index([author_id])
   @@index([channel_name])
@@ -60,6 +61,7 @@ model Comment {
 
   feed       Feed    @relation(fields: [feed_id], references: [feed_id])
   replies    Reply[]
+  violations Violation[] @relation("ViolationComment")
 
   @@index([feed_id])
   @@index([author_id])
@@ -89,6 +91,7 @@ model Reply {
 
   feed       Feed    @relation(fields: [feed_id], references: [feed_id])
   comment    Comment @relation(fields: [comment_id], references: [comment_id])
+  violations Violation[] @relation("ViolationReply")
 
   @@index([comment_id])
   @@index([feed_id])
@@ -143,6 +146,8 @@ model Violation {
   target_type         String
   target_id           String
   target_feed_id      String?
+  target_comment_id   String?
+  target_reply_id     String?
   target_author       String?
   target_author_id    String?
   violation_reason    String
@@ -157,6 +162,9 @@ model Violation {
   operator_admin_name String?
   created_at          DateTime  @default(now())
 
+  feed    Feed?    @relation("ViolationFeed", fields: [target_feed_id], references: [feed_id])
+  comment Comment? @relation("ViolationComment", fields: [target_comment_id], references: [comment_id])
+  reply   Reply?   @relation("ViolationReply", fields: [target_reply_id], references: [reply_id])
   member  Member?  @relation("ViolationTarget", fields: [target_author_id], references: [tinyid])
   user    PlatformUser @relation(fields: [operator_user_id], references: [id])
 
@@ -165,6 +173,9 @@ model Violation {
   @@index([created_at])
   @@index([operator_user_id])
   @@index([target_author_id])
+  @@index([target_feed_id])
+  @@index([target_comment_id])
+  @@index([target_reply_id])
   @@map("violations")
 }
 

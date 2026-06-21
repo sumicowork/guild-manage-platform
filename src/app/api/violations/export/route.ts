@@ -48,39 +48,27 @@ export async function GET(req: NextRequest) {
         user: {
           select: { username: true, display_name: true },
         },
+        feed: {
+          select: { title: true },
+        },
+        comment: {
+          select: { content_text: true },
+        },
+        reply: {
+          select: { content_text: true },
+        },
       },
     });
-
-    // Manual lookups for feed/comment/reply (FK relations removed due to polymorphic target_id)
-    const feedIds = [...new Set(violations.filter(v => v.target_type === "feed").map(v => v.target_id))];
-    const commentIds = [...new Set(violations.filter(v => v.target_type === "comment").map(v => v.target_id))];
-    const replyIds = [...new Set(violations.filter(v => v.target_type === "reply").map(v => v.target_id))];
-
-    const [feeds, comments, replies] = await Promise.all([
-      feedIds.length > 0
-        ? prisma.feed.findMany({ where: { feed_id: { in: feedIds } }, select: { feed_id: true, title: true } })
-        : Promise.resolve([]),
-      commentIds.length > 0
-        ? prisma.comment.findMany({ where: { comment_id: { in: commentIds } }, select: { comment_id: true, content_text: true } })
-        : Promise.resolve([]),
-      replyIds.length > 0
-        ? prisma.reply.findMany({ where: { reply_id: { in: replyIds } }, select: { reply_id: true, content_text: true } })
-        : Promise.resolve([]),
-    ]);
-
-    const feedMap = new Map(feeds.map(f => [f.feed_id, f]));
-    const commentMap = new Map(comments.map(c => [c.comment_id, c]));
-    const replyMap = new Map(replies.map(r => [r.reply_id, r]));
 
     // Build export rows
     const rows = violations.map((v) => {
       let contentSnippet = "";
-      if (v.target_type === "feed") {
-        contentSnippet = feedMap.get(v.target_id)?.title || "";
-      } else if (v.target_type === "comment") {
-        contentSnippet = commentMap.get(v.target_id)?.content_text || "";
-      } else if (v.target_type === "reply") {
-        contentSnippet = replyMap.get(v.target_id)?.content_text || "";
+      if (v.target_type === "feed" && v.feed) {
+        contentSnippet = v.feed.title || "";
+      } else if (v.target_type === "comment" && v.comment) {
+        contentSnippet = v.comment.content_text || "";
+      } else if (v.target_type === "reply" && v.reply) {
+        contentSnippet = v.reply.content_text || "";
       }
 
       const actionDetail = v.action_detail as Record<string, unknown> | null;

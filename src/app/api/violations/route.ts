@@ -80,6 +80,9 @@ export async function GET(req: NextRequest) {
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
+          feed: { select: { feed_id: true, title: true, content_snippet: true } },
+          comment: { select: { comment_id: true, content_text: true } },
+          reply: { select: { reply_id: true, content_text: true } },
           user: {
             select: {
               id: true,
@@ -92,35 +95,7 @@ export async function GET(req: NextRequest) {
       prisma.violation.count({ where }),
     ]);
 
-    // Manual lookups for feed/comment/reply (FK relations removed due to polymorphic target_id)
-    const feedIds = [...new Set(violations.filter(v => v.target_type === "feed").map(v => v.target_id))];
-    const commentIds = [...new Set(violations.filter(v => v.target_type === "comment").map(v => v.target_id))];
-    const replyIds = [...new Set(violations.filter(v => v.target_type === "reply").map(v => v.target_id))];
-
-    const [feeds, comments, replies] = await Promise.all([
-      feedIds.length > 0
-        ? prisma.feed.findMany({ where: { feed_id: { in: feedIds } }, select: { feed_id: true, title: true, content_snippet: true } })
-        : Promise.resolve([]),
-      commentIds.length > 0
-        ? prisma.comment.findMany({ where: { comment_id: { in: commentIds } }, select: { comment_id: true, content_text: true } })
-        : Promise.resolve([]),
-      replyIds.length > 0
-        ? prisma.reply.findMany({ where: { reply_id: { in: replyIds } }, select: { reply_id: true, content_text: true } })
-        : Promise.resolve([]),
-    ]);
-
-    const feedMap = new Map(feeds.map(f => [f.feed_id, f]));
-    const commentMap = new Map(comments.map(c => [c.comment_id, c]));
-    const replyMap = new Map(replies.map(r => [r.reply_id, r]));
-
-    const enriched = violations.map(v => ({
-      ...v,
-      feed: v.target_type === "feed" ? (feedMap.get(v.target_id) ?? null) : null,
-      comment: v.target_type === "comment" ? (commentMap.get(v.target_id) ?? null) : null,
-      reply: v.target_type === "reply" ? (replyMap.get(v.target_id) ?? null) : null,
-    }));
-
-    const rawViolations = serializeBigInt(enriched);
+    const rawViolations = serializeBigInt(violations);
     const camelViolations = toCamelCase(rawViolations) as any[];
     const mapped = camelViolations.map((v: any) => ({
       ...v,
@@ -267,7 +242,9 @@ export async function POST(req: NextRequest) {
       data: {
         target_type: targetType,
         target_id: targetId,
-        target_feed_id: resolvedTargetFeedId,
+        target_feed_id: targetType === "feed" ? targetId : resolvedTargetFeedId,
+        target_comment_id: targetType === "comment" ? targetId : null,
+        target_reply_id: targetType === "reply" ? targetId : null,
         target_author: resolvedTargetAuthor,
         target_author_id: resolvedTargetAuthorId,
         violation_reason: resolvedReason,
@@ -282,6 +259,9 @@ export async function POST(req: NextRequest) {
         operator_user_id: BigInt(auth.userId),
       },
       include: {
+        feed: { select: { feed_id: true, title: true } },
+        comment: { select: { comment_id: true, content_text: true } },
+        reply: { select: { reply_id: true, content_text: true } },
         user: {
           select: { id: true, username: true, display_name: true },
         },
@@ -378,26 +358,14 @@ export async function POST(req: NextRequest) {
     const updated = await prisma.violation.findUnique({
       where: { id: violation.id },
       include: {
+        feed: { select: { feed_id: true, title: true } },
+        comment: { select: { comment_id: true, content_text: true } },
+        reply: { select: { reply_id: true, content_text: true } },
         user: { select: { id: true, username: true, display_name: true } },
       },
     });
 
-    // Manual lookup for the target (FK relations removed due to polymorphic target_id)
-    let targetInfo: Record<string, unknown> = {};
-    if (updated) {
-      if (updated.target_type === "feed") {
-        const f = await prisma.feed.findUnique({ where: { feed_id: updated.target_id }, select: { feed_id: true, title: true } });
-        targetInfo = { feed: f };
-      } else if (updated.target_type === "comment") {
-        const c = await prisma.comment.findUnique({ where: { comment_id: updated.target_id }, select: { comment_id: true, content_text: true } });
-        targetInfo = { comment: c };
-      } else if (updated.target_type === "reply") {
-        const r = await prisma.reply.findUnique({ where: { reply_id: updated.target_id }, select: { reply_id: true, content_text: true } });
-        targetInfo = { reply: r };
-      }
-    }
-
-    const result = toCamelCase(serializeBigInt({ ...updated, ...targetInfo })) as any;
+    const result = toCamelCase(serializeBigInt(updated)) as any;
     result.cliResults = cliResults;
 
     return success(result);
