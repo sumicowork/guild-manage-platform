@@ -3,6 +3,7 @@ import {
   getGuildFeeds,
   getFeedComments,
   getFeedDetail,
+  getNextPageReplies,
 } from "@/lib/cli/feed";
 import { getGuildMembers } from "@/lib/cli/member";
 import fs from "fs";
@@ -203,6 +204,62 @@ async function upsertReply(
 }
 
 /**
+ * Fetch all nested replies for a comment that has has_more_replies=true.
+ * Paginates through getNextPageReplies using attach_info until no more pages.
+ * Matches Python scraper's _fetch_more_replies logic.
+ */
+async function fetchAllRepliesForComment(
+  feedId: string,
+  comment: any,
+  guildId: string,
+  onReply: (reply: any) => Promise<void>
+): Promise<number> {
+  if (!comment.has_more_replies) return 0;
+
+  let attachInfo: string = comment.attach_info ?? "";
+  if (!attachInfo) return 0;
+
+  let fetched = 0;
+  let pages = 0;
+  const MAX_PAGES = 20;
+
+  while (attachInfo && pages < MAX_PAGES) {
+    pages++;
+    try {
+      const result = await getNextPageReplies(
+        feedId,
+        comment.comment_id,
+        guildId,
+        guildId, // channel_id fallback to guildId, matching Python scraper
+        attachInfo
+      );
+
+      if (result.replies && result.replies.length > 0) {
+        for (const reply of result.replies) {
+          try {
+            await onReply(reply);
+            fetched++;
+          } catch (err) {
+            console.error(`[Crawler] Failed to upsert sub-reply ${reply.reply_id}:`, err);
+          }
+        }
+      }
+
+      if (!result.hasMore || !result.nextAttachInfo) break;
+      attachInfo = result.nextAttachInfo;
+    } catch (err) {
+      console.error(
+        `[Crawler] Failed to fetch next-page-replies for comment ${comment.comment_id}:`,
+        err
+      );
+      break;
+    }
+  }
+
+  return fetched;
+}
+
+/**
  * Normalize member object from CLI.
  * CLI `manage get-guild-member-list` may return Chinese keys:
  *   加入时间 → joinTime,  昵称 → nickname
@@ -328,7 +385,7 @@ export async function runFullCrawl(
             await upsertComment(comment, feedId);
             stats.commentsTotal++;
 
-            // Process replies nested in comments
+            // Process replies nested in comments (initial batch from API)
             if (comment.replies_preview && Array.isArray(comment.replies_preview)) {
               for (const reply of comment.replies_preview) {
                 try {
@@ -338,6 +395,19 @@ export async function runFullCrawl(
                   console.error(`[Crawler] Failed to upsert reply ${reply.reply_id}:`, err);
                 }
               }
+            }
+
+            // Fetch remaining sub-replies via pagination if has_more_replies
+            if (comment.has_more_replies) {
+              await fetchAllRepliesForComment(
+                feedId,
+                comment,
+                gid,
+                async (reply) => {
+                  await upsertReply(reply, comment.comment_id, feedId);
+                  stats.commentsTotal++;
+                }
+              );
             }
           }
 
@@ -559,6 +629,19 @@ export async function runUpdateCrawl(
                         stats.errors++;
                       }
                     }
+                  }
+
+                  // Fetch remaining sub-replies via pagination if has_more_replies
+                  if (comment.has_more_replies) {
+                    await fetchAllRepliesForComment(
+                      feedId,
+                      comment,
+                      gid,
+                      async (reply) => {
+                        await upsertReply(reply, comment.comment_id, feedId);
+                        stats.commentsAdded++;
+                      }
+                    );
                   }
                 } catch {
                   stats.errors++;
