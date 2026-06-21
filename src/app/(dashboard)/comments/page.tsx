@@ -26,6 +26,7 @@ import { Search, AlertTriangle, ThumbsUp } from 'lucide-react';
 
 interface Comment {
   id: string;
+  commentId: string;
   feedId: string;
   feedTitle: string;
   author: string;
@@ -106,7 +107,7 @@ export default function CommentsPage() {
   const handleViolation = (e: React.MouseEvent, comment: Comment) => {
     e.stopPropagation();
     setViolationTarget({
-      id: comment.id,
+      id: comment.commentId,
       author: comment.author,
       authorId: comment.authorId,
       feedId: comment.feedId,

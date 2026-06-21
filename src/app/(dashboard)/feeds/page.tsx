@@ -20,6 +20,7 @@ import { Search, AlertTriangle } from 'lucide-react';
 
 interface Feed {
   id: string;
+  feedId: string;
   author: string;
   authorId: string;
   channelName: string;
@@ -143,7 +144,7 @@ export default function FeedsPage() {
 
   const handleViolation = (e: React.MouseEvent, feed: Feed) => {
     e.stopPropagation();
-    setViolationTarget({ id: feed.id, author: feed.author, authorId: feed.authorId });
+    setViolationTarget({ id: feed.feedId, author: feed.author, authorId: feed.authorId });
     setViolationOpen(true);
   };
 
