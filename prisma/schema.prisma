@@ -14,6 +14,7 @@ model Feed {
   author          String?
   author_id       String?
   channel_name    String?
+  channel_id      String?
   title           String?
   content         String?
   content_snippet String?

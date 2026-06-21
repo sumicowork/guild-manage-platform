@@ -311,7 +311,6 @@ export async function deleteReply(
     feedCreateTime: string;
     commentAuthorId: string;
     commentCreateTime: string;
-    channelId?: string;
   },
   adminIdentityId?: bigint | number | null
 ): Promise<boolean> {
@@ -327,7 +326,6 @@ export async function deleteReply(
       reply_id: replyId,
       replier_id: extra.feedAuthorId,
       guild_id: guildId,
-      channel_id: extra.channelId || undefined,
     }, adminIdentityId);
     return true;
   } catch (err) {

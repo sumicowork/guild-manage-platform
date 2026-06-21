@@ -162,6 +162,7 @@ export async function POST(req: NextRequest) {
     let targetTitle: string = "";
     let targetShareUrl: string = "";
     let targetCommentId: string | null = null;
+    let targetChannelId: string | null = null;
     let targetChannelName: string | null = null;
     let targetCreateTimeRaw: bigint | null = null;
     let targetCommentAuthorId: string | null = null;
@@ -171,7 +172,7 @@ export async function POST(req: NextRequest) {
     if (targetType === "feed") {
       const feed = await prisma.feed.findUnique({
         where: { feed_id: targetId },
-        select: { author: true, author_id: true, feed_id: true, title: true, share_url: true, channel_name: true, create_time_raw: true },
+        select: { author: true, author_id: true, feed_id: true, title: true, share_url: true, channel_name: true, channel_id: true, create_time_raw: true },
       });
       if (feed) {
         resolvedTargetAuthor = feed.author;
@@ -179,6 +180,7 @@ export async function POST(req: NextRequest) {
         resolvedTargetFeedId = feed.feed_id;
         targetTitle = feed.title || "";
         targetShareUrl = feed.share_url || "";
+        targetChannelId = feed.channel_id;
         targetChannelName = feed.channel_name;
         targetCreateTimeRaw = feed.create_time_raw;
       }
@@ -186,7 +188,7 @@ export async function POST(req: NextRequest) {
       const comment = await prisma.comment.findUnique({
         where: { comment_id: targetId },
         include: {
-          feed: { select: { feed_id: true, title: true, share_url: true, channel_name: true, create_time_raw: true } },
+          feed: { select: { feed_id: true, title: true, share_url: true, channel_name: true, channel_id: true, create_time_raw: true } },
         },
       });
       if (comment) {
@@ -197,6 +199,7 @@ export async function POST(req: NextRequest) {
         targetCommentAuthorId = comment.author_id;
         targetTitle = comment.feed?.title || "";
         targetShareUrl = comment.feed?.share_url || "";
+        targetChannelId = comment.feed?.channel_id ?? null;
         targetChannelName = comment.feed?.channel_name;
         targetCreateTimeRaw = comment.feed?.create_time_raw;
       }
@@ -205,7 +208,7 @@ export async function POST(req: NextRequest) {
         where: { reply_id: targetId },
         include: {
           comment: { select: { author_id: true, create_time_raw: true } },
-          feed: { select: { feed_id: true, author_id: true, title: true, share_url: true, channel_name: true, create_time_raw: true } },
+          feed: { select: { feed_id: true, author_id: true, title: true, share_url: true, channel_name: true, channel_id: true, create_time_raw: true } },
         },
       });
       if (reply) {
@@ -215,6 +218,7 @@ export async function POST(req: NextRequest) {
         targetCommentId = reply.comment_id;
         targetTitle = reply.feed?.title || "";
         targetShareUrl = reply.feed?.share_url || "";
+        targetChannelId = reply.feed?.channel_id ?? null;
         targetChannelName = reply.feed?.channel_name;
         targetCreateTimeRaw = reply.feed?.create_time_raw;
         targetFeedAuthorId = reply.feed?.author_id || null;
@@ -281,7 +285,7 @@ export async function POST(req: NextRequest) {
     const feedCreateTimeStr = targetCreateTimeRaw ? String(targetCreateTimeRaw) : "";
 
     if (isMove && targetType === "feed" && resolvedTargetFeedId && targetChannel) {
-      const ok = await movePost(GUILD_ID, resolvedTargetFeedId, targetChannel, targetChannelName || "", adminIdentityId);
+      const ok = await movePost(GUILD_ID, resolvedTargetFeedId, targetChannel, targetChannelId || targetChannelName || "", adminIdentityId);
       cliResults.push(ok ? "移帖成功" : "移帖失败");
       // Update feed status in DB
       if (ok) {
@@ -294,7 +298,7 @@ export async function POST(req: NextRequest) {
 
     if (isDelete) {
       if (targetType === "feed" && resolvedTargetFeedId) {
-        const ok = await deletePost(GUILD_ID, resolvedTargetFeedId, targetChannelName || "", feedCreateTimeStr, adminIdentityId);
+        const ok = await deletePost(GUILD_ID, resolvedTargetFeedId, targetChannelId || targetChannelName || "", feedCreateTimeStr, adminIdentityId);
         cliResults.push(ok ? "删帖成功" : "删帖失败");
         if (ok) {
           await prisma.feed.update({
@@ -324,7 +328,6 @@ export async function POST(req: NextRequest) {
             feedCreateTime: feedCreateTimeStr,
             commentAuthorId: targetCommentAuthorId || "",
             commentCreateTime: commentCreateTimeStr,
-            channelId: targetChannelName || undefined,
           },
           adminIdentityId
         );

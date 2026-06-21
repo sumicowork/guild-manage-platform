@@ -7,20 +7,34 @@ export async function GET(req: NextRequest) {
     const auth = await getAuthUser(req);
     if (!auth) return unauthorized();
 
-    // Get distinct channel names from feeds
-    const feeds = await prisma.feed.findMany({
-      where: { status: "active" },
+    // Get channels: prefer numeric channel_id, fallback to name-based
+    const feedsWithId = await prisma.feed.findMany({
+      where: { status: "active", channel_id: { not: null } },
+      select: { channel_id: true, channel_name: true },
+      distinct: ["channel_id"],
+      orderBy: { channel_name: "asc" },
+    });
+
+    const feedsWithoutId = await prisma.feed.findMany({
+      where: { status: "active", channel_id: null, channel_name: { not: null } },
       select: { channel_name: true },
       distinct: ["channel_name"],
       orderBy: { channel_name: "asc" },
     });
 
-    const channels = feeds
-      .filter((f) => f.channel_name)
-      .map((f) => ({
-        id: f.channel_name!,
-        name: f.channel_name!,
-      }));
+    const channels: { id: string; name: string }[] = [];
+
+    for (const f of feedsWithId) {
+      if (f.channel_id) {
+        channels.push({ id: f.channel_id, name: f.channel_name ?? f.channel_id });
+      }
+    }
+
+    for (const f of feedsWithoutId) {
+      if (f.channel_name) {
+        channels.push({ id: f.channel_name, name: f.channel_name });
+      }
+    }
 
     return success(channels);
   } catch (err) {
