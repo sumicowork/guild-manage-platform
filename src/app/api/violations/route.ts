@@ -378,6 +378,7 @@ export async function POST(req: NextRequest) {
     return success(result);
   } catch (err) {
     console.error("Violation create error:", err);
-    return error("创建违规记录失败", 500);
+    const msg = err instanceof Error ? err.message : "创建违规记录失败";
+    return error(msg, 500);
   }
 }
