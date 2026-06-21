@@ -214,8 +214,8 @@ export default function SettingsPage() {
   };
 
   // Start CLI login: get QR code data
-  // If loginTargetIdentityId is set, the token will be saved to that identity after scan
-  const handleStartCliLogin = async () => {
+  // If forIdentityId is provided, the token will be saved to that identity after scan
+  const handleStartCliLogin = async (forIdentityId?: number | null) => {
     try {
       const data = await api.post<{
         authUrl: string | null;
@@ -225,19 +225,19 @@ export default function SettingsPage() {
       }>('/cli/login', {});
       setLoginQrData(data);
       setLoginDialogOpen(true);
-      // Start polling in background
-      handlePollCliLogin();
+      // Start polling in background (pass identity explicitly to avoid stale closure)
+      handlePollCliLogin(forIdentityId);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '启动 CLI 登录失败');
     }
   };
 
   // Poll for CLI login completion (blocks until scan or timeout)
-  const handlePollCliLogin = async () => {
+  const handlePollCliLogin = async (forIdentityId?: number | null) => {
     setLoginPolling(true);
     try {
-      // Use loginTargetIdentityId if set, otherwise fall back to selectedIdentityId from context
-      const targetId = loginTargetIdentityId ?? selectedIdentityId;
+      // Use the explicitly passed identity; fall back to the globally selected one
+      const targetId = forIdentityId ?? selectedIdentityId;
       const identityParam = targetId ? `?identityId=${targetId}` : '';
       const result = await api.get<{ message: string }>('/cli/login' + identityParam);
       toast.success(result.message || 'CLI 登录成功');
@@ -258,10 +258,10 @@ export default function SettingsPage() {
     }
   };
 
-  // Start login for a specific identity
+  // Start login for a specific identity (pass ID directly, no state dependency)
   const handleIdentityLogin = async (identityId: number) => {
     setLoginTargetIdentityId(identityId);
-    await handleStartCliLogin();
+    await handleStartCliLogin(identityId);
   };
 
   return (

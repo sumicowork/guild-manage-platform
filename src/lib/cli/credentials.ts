@@ -63,7 +63,7 @@ export async function switchToIdentity(identityId: bigint | number | null | unde
     return;
   }
 
-  const token = decrypt(identity.token);
+  const token = decrypt(identity.token).replace(/^["']|["']$/g, "");
   const envPath = getCredentialEnvPath(identity.id);
 
   ensureDir(path.dirname(envPath));
