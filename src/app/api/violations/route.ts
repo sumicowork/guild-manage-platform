@@ -234,6 +234,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Validate target exists in DB to prevent FK constraint violations
+    let targetExists = false;
+    if (targetType === "feed" && resolvedTargetFeedId) {
+      targetExists = !!(await prisma.feed.findUnique({ where: { feed_id: targetId }, select: { feed_id: true } }));
+    } else if (targetType === "comment" && targetCommentId) {
+      targetExists = true; // already resolved above
+    } else if (targetType === "reply") {
+      targetExists = !!(await prisma.reply.findUnique({ where: { reply_id: targetId }, select: { reply_id: true } }));
+    }
+    if (!targetExists) {
+      return error(`目标${targetType === "feed" ? "帖子" : targetType === "comment" ? "评论" : "回复"} (${targetId}) 在数据库中不存在，请先爬取数据`, 400);
+    }
+
     // Build action_detail from client fields
     const resolvedActionDetail: Record<string, unknown> = {};
     if (targetChannel) resolvedActionDetail.movedToChannel = targetChannel;
