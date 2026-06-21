@@ -67,7 +67,9 @@ export async function switchToIdentity(identityId: bigint | number | null | unde
   const envPath = getCredentialEnvPath(identity.id);
 
   ensureDir(path.dirname(envPath));
-  fs.writeFileSync(envPath, `QQ_AI_CONNECT_TOKEN=${token}\n`, "utf-8");
+  // CLI 自身的 .env 格式使用双引号包裹值，保持一致
+  const header = "# QQ AI Connect 凭证 — 敏感信息，勿提交到 git。\n";
+  fs.writeFileSync(envPath, header + `QQ_AI_CONNECT_TOKEN="${token}"\n`, "utf-8");
 
   console.log(`[credentials] Switched to admin identity ${identity.id} (${identity.nickname})`);
 }
@@ -117,7 +119,13 @@ export function getCurrentToken(): string | null {
     if (!fs.existsSync(envPath)) return null;
     const content = fs.readFileSync(envPath, "utf-8");
     const match = content.match(/^QQ_AI_CONNECT_TOKEN=(.+)$/m);
-    return match ? match[1].trim() : null;
+    if (!match) return null;
+    let token = match[1].trim();
+    // CLI 可能在值外包裹双引号，去掉
+    if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+      token = token.slice(1, -1);
+    }
+    return token;
   } catch {
     return null;
   }
