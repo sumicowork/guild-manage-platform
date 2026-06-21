@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "20", 10)));
     const search = searchParams.get("search")?.trim() || undefined;
     const channelId = searchParams.get("channelId")?.trim() || undefined;
-    const status = searchParams.get("status") || "active";
+    const status = searchParams.get("status")?.trim() || undefined;
     const sort = searchParams.get("sort") || "createdAt";
     const direction = searchParams.get("direction") || "desc";
     const dateFrom = searchParams.get("dateFrom") || undefined;
@@ -23,10 +23,8 @@ export async function GET(req: NextRequest) {
     const where: Prisma.FeedWhereInput = {};
 
     // Status filter
-    if (status === "deleted") {
-      where.status = "deleted";
-    } else {
-      where.status = "active";
+    if (status) {
+      where.status = status;
     }
 
     // Channel filter

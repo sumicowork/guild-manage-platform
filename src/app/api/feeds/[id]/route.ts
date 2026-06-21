@@ -60,6 +60,7 @@ export async function GET(
           content: r.contentText || '',
           likeCount: r.likeCount ?? 0,
           createdAt: r.createTime ?? r.createdAt,
+          targetReplyId: r.targetReplyId ?? null,
         })),
       })),
     };

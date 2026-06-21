@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api-client';
-import { DataTable, Column } from '@/components/DataTable';
 import { FeedDetail } from '@/components/FeedDetail';
 import { ViolationDialog } from '@/components/ViolationDialog';
 import { Input } from '@/components/ui/input';
@@ -16,7 +15,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Search, AlertTriangle } from 'lucide-react';
+import {
+  Search,
+  ThumbsUp,
+  MessageCircle,
+  Clock,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react';
 
 interface Feed {
   id: string;
@@ -24,9 +30,9 @@ interface Feed {
   author: string;
   authorId: string;
   channelName: string;
-  channelId: string;
   title: string;
   content: string;
+  contentSnippet: string;
   images?: string[];
   createdAt: string;
   likeCount: number;
@@ -34,16 +40,25 @@ interface Feed {
   status: string;
   comments?: Array<{
     id: string;
+    commentId: string;
     author: string;
+    authorId: string;
+    feedId: string;
     content: string;
     createdAt: string;
     likeCount: number;
+    status: string;
     replies?: Array<{
       id: string;
+      replyId: string;
       author: string;
+      authorId: string;
       content: string;
       createdAt: string;
       likeCount: number;
+      status: string;
+      targetReplyId?: string | null;
+      targetUser?: string | null;
     }>;
   }>;
 }
@@ -58,6 +73,14 @@ interface FeedListResponse {
   total: number;
   page: number;
   pageSize: number;
+}
+
+interface ViolationTarget {
+  type: 'feed' | 'comment' | 'reply';
+  id: string;
+  author: string;
+  authorId: string;
+  feedId?: string;
 }
 
 const statusColors: Record<string, string> = {
@@ -86,13 +109,10 @@ export default function FeedsPage() {
 
   const [selectedFeed, setSelectedFeed] = useState<Feed | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const [violationOpen, setViolationOpen] = useState(false);
-  const [violationTarget, setViolationTarget] = useState<{
-    id: string;
-    author: string;
-    authorId: string;
-  } | null>(null);
+  const [violationTarget, setViolationTarget] = useState<ViolationTarget | null>(null);
 
   const pageSize = 20;
 
@@ -127,103 +147,41 @@ export default function FeedsPage() {
     api.get<Channel[]>('/channels').then(setChannels).catch(() => {});
   }, []);
 
-  const handleSort = (field: string) => {
-    if (sortField === field) {
-      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDir('desc');
+  // Load full feed detail (with comments + replies) on card click
+  const handleCardClick = async (feed: Feed) => {
+    setDetailLoading(true);
+    try {
+      const detail = await api.get<Feed>(`/feeds/${feed.feedId}`);
+      setSelectedFeed(detail);
+      setDetailOpen(true);
+    } catch {
+      toast.error('获取帖子详情失败');
+    } finally {
+      setDetailLoading(false);
     }
-    setPage(1);
   };
 
-  const handleRowClick = (feed: Feed) => {
-    setSelectedFeed(feed);
-    setDetailOpen(true);
-  };
-
-  const handleViolation = (e: React.MouseEvent, feed: Feed) => {
-    e.stopPropagation();
-    setViolationTarget({ id: feed.feedId, author: feed.author, authorId: feed.authorId });
+  const handleViolationFeed = (feedId: string, author: string, authorId: string) => {
+    setViolationTarget({ type: 'feed', id: feedId, author, authorId });
     setViolationOpen(true);
   };
 
-  const columns: Column<Feed>[] = [
-    {
-      key: 'id',
-      header: 'ID',
-      width: '100px',
-      render: (f) => <span className="font-mono text-xs text-gray-500">{f.id.slice(0, 8)}</span>,
-    },
-    { key: 'author', header: '作者', width: '100px' },
-    { key: 'channelName', header: '版块', width: '100px' },
-    {
-      key: 'title',
-      header: '标题',
-      render: (f) => (
-        <span className="block max-w-[300px] truncate">{f.title || '(无标题)'}</span>
-      ),
-    },
-    {
-      key: 'createdAt',
-      header: '时间',
-      sortable: true,
-      width: '160px',
-      render: (f) => (
-        <span className="text-xs text-gray-500">
-          {new Date(f.createdAt).toLocaleString('zh-CN')}
-        </span>
-      ),
-    },
-    {
-      key: 'likeCount',
-      header: '👍',
-      sortable: true,
-      width: '60px',
-      align: 'center',
-      render: (f) => <span className="text-gray-700">{f.likeCount}</span>,
-    },
-    {
-      key: 'commentCount',
-      header: '💬',
-      sortable: true,
-      width: '60px',
-      align: 'center',
-      render: (f) => <span className="text-gray-700">{f.commentCount}</span>,
-    },
-    {
-      key: 'status',
-      header: '状态',
-      width: '80px',
-      render: (f) => (
-        <Badge className={statusColors[f.status] || 'bg-gray-200 text-gray-700'}>
-          {statusLabels[f.status] || f.status}
-        </Badge>
-      ),
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      width: '100px',
-      align: 'center',
-      render: (f) => (
-        <Button
-          variant="ghost"
-          size="xs"
-          className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"
-          onClick={(e) => handleViolation(e, f)}
-        >
-          <AlertTriangle className="size-3" />
-          标记违规
-        </Button>
-      ),
-    },
-  ];
+  const handleViolationComment = (commentId: string, author: string, authorId: string, feedId: string) => {
+    setViolationTarget({ type: 'comment', id: commentId, author, authorId, feedId });
+    setViolationOpen(true);
+  };
+
+  const handleViolationReply = (replyId: string, author: string, authorId: string, feedId: string) => {
+    setViolationTarget({ type: 'reply', id: replyId, author, authorId, feedId });
+    setViolationOpen(true);
+  };
+
+  const totalPages = Math.ceil(total / pageSize);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">帖子管理</h2>
+        <h2 className="text-lg font-semibold text-gray-900">内容管理</h2>
       </div>
 
       {/* Filters */}
@@ -231,7 +189,7 @@ export default function FeedsPage() {
         <div className="relative">
           <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-gray-400" />
           <Input
-            placeholder="搜索标题/作者..."
+            placeholder="搜索标题/作者/内容..."
             className="w-60 pl-8"
             value={search}
             onChange={(e) => {
@@ -264,26 +222,147 @@ export default function FeedsPage() {
             <SelectItem value="moved">已移帖</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={sortField} onValueChange={(v) => { setSortField(v ?? 'createdAt'); setPage(1); }}>
+          <SelectTrigger className="w-[120px]">
+            <SelectValue placeholder="排序" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="createdAt">按时间</SelectItem>
+            <SelectItem value="likeCount">按点赞</SelectItem>
+            <SelectItem value="commentCount">按评论</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => { setSortDir(sortDir === 'asc' ? 'desc' : 'asc'); setPage(1); }}
+          className="text-xs"
+        >
+          {sortDir === 'desc' ? '↓ 降序' : '↑ 升序'}
+        </Button>
       </div>
 
-      {/* Table */}
-      <DataTable
-        columns={columns}
-        data={feeds}
-        loading={loading}
-        rowKey={(f) => f.id}
-        onRowClick={handleRowClick}
-        sort={{ field: sortField, direction: sortDir, onSort: handleSort }}
-        pagination={{
-          page,
-          pageSize,
-          total,
-          onPageChange: setPage,
-        }}
-      />
+      {/* Card-based Feed List */}
+      {loading ? (
+        <div className="space-y-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-gray-200 bg-white p-5 animate-pulse">
+              <div className="h-4 w-24 bg-gray-200 rounded mb-3" />
+              <div className="h-4 w-full bg-gray-200 rounded mb-2" />
+              <div className="h-4 w-3/4 bg-gray-200 rounded" />
+            </div>
+          ))}
+        </div>
+      ) : feeds.length === 0 ? (
+        <div className="rounded-xl border border-gray-200 bg-white py-16 text-center text-sm text-gray-400">
+          暂无内容
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {feeds.map((feed) => (
+            <div
+              key={feed.id}
+              className="rounded-xl border border-gray-200 bg-white p-5 hover:border-blue-200 hover:shadow-sm transition-all cursor-pointer"
+              onClick={() => handleCardClick(feed)}
+            >
+              {/* Header row */}
+              <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
+                <span className="font-medium text-gray-900">{feed.author}</span>
+                <span>·</span>
+                <span>{feed.channelName}</span>
+                <span>·</span>
+                <span className="flex items-center gap-1">
+                  <Clock className="size-3" />
+                  {new Date(feed.createdAt).toLocaleString('zh-CN')}
+                </span>
+                <Badge className={statusColors[feed.status] || 'bg-gray-200 text-gray-700'}>
+                  {statusLabels[feed.status] || feed.status}
+                </Badge>
+              </div>
+
+              {/* Title */}
+              <h3 className="text-sm font-medium text-gray-900 mb-1.5">
+                {feed.title || '(无标题)'}
+              </h3>
+
+              {/* Content preview */}
+              {(feed.contentSnippet || feed.content) && (
+                <p className="text-sm text-gray-500 line-clamp-2 mb-3">
+                  {feed.contentSnippet || feed.content}
+                </p>
+              )}
+
+              {/* Images preview */}
+              {feed.images && feed.images.length > 0 && (
+                <div className="flex gap-1.5 mb-3">
+                  {feed.images.slice(0, 3).map((img, i) => (
+                    <img
+                      key={i}
+                      src={img}
+                      alt={`图片 ${i + 1}`}
+                      className="size-16 rounded-lg object-cover ring-1 ring-gray-200"
+                    />
+                  ))}
+                  {feed.images.length > 3 && (
+                    <div className="size-16 rounded-lg bg-gray-100 flex items-center justify-center text-xs text-gray-400 ring-1 ring-gray-200">
+                      +{feed.images.length - 3}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Footer */}
+              <div className="flex items-center gap-4 text-xs text-gray-400">
+                <span className="flex items-center gap-1">
+                  <ThumbsUp className="size-3" />
+                  {feed.likeCount}
+                </span>
+                <span className="flex items-center gap-1">
+                  <MessageCircle className="size-3" />
+                  {feed.commentCount}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-2">
+          <span className="text-xs text-gray-400">
+            共 {total} 条，第 {page}/{totalPages} 页
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage(page - 1)}
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage(page + 1)}
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Feed Detail Dialog */}
-      <FeedDetail feed={selectedFeed} open={detailOpen} onOpenChange={setDetailOpen} />
+      <FeedDetail
+        feed={selectedFeed}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        onViolationFeed={handleViolationFeed}
+        onViolationComment={handleViolationComment}
+        onViolationReply={handleViolationReply}
+      />
 
       {/* Violation Dialog */}
       {violationTarget && (
@@ -296,10 +375,11 @@ export default function FeedsPage() {
               fetchFeeds();
             }
           }}
-          targetType="feed"
+          targetType={violationTarget.type}
           targetId={violationTarget.id}
           targetAuthor={violationTarget.author}
           targetAuthorId={violationTarget.authorId}
+          targetFeedId={violationTarget.feedId}
         />
       )}
     </div>

@@ -10,7 +10,6 @@ import { Separator } from '@/components/ui/separator';
 import {
   LayoutDashboard,
   FileText,
-  MessageSquare,
   Users,
   AlertTriangle,
   Settings,
@@ -22,8 +21,7 @@ import {
 
 const navItems = [
   { href: '/', label: '仪表盘', icon: LayoutDashboard },
-  { href: '/feeds', label: '帖子管理', icon: FileText },
-  { href: '/comments', label: '评论管理', icon: MessageSquare },
+  { href: '/feeds', label: '内容管理', icon: FileText },
   { href: '/members', label: '成员管理', icon: Users },
   { href: '/violations', label: '违规记录', icon: AlertTriangle },
   { href: '/violations/config', label: '违规配置', icon: Sliders },
