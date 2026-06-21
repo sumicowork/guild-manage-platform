@@ -68,13 +68,13 @@ export function AdminSwitcher({ selectedId, onSelect }: AdminSwitcherProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={
-          <Button variant="outline" size="sm" className="gap-1.5">
+        render={(props) => (
+          <Button variant="outline" size="sm" className="gap-1.5" {...props}>
             <Shield className="size-3.5" />
             <span className="max-w-[120px] truncate">{selected?.name || '选择身份'}</span>
             <ChevronDown className="size-3.5" />
           </Button>
-        }
+        )}
       />
       <DropdownMenuContent align="end" side="bottom">
         <DropdownMenuLabel>管理身份</DropdownMenuLabel>
