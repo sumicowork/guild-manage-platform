@@ -198,7 +198,7 @@ export async function executeCli(
 
   const cliBase = resolveCliPath();
   const flagArgs = params ? buildFlagArgs(params as Record<string, any>) : [];
-  const args = [domain, action, ...flagArgs, "--json"];
+  const args = [domain, action, ...flagArgs, "--json", "--yes"];
 
   console.log(`[CLI] ${domain} ${action}: ${args.join(" ")}` + (adminIdentityId ? ` (identity=${adminIdentityId})` : ""));
 
