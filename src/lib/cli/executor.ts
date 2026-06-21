@@ -1,6 +1,7 @@
 import { spawnSync } from "child_process";
 import fs from "fs";
 import path from "path";
+import { prisma } from "@/lib/db";
 import { switchToIdentity, buildCliEnv } from "./credentials";
 
 // ── 限流 & 重试常量（对齐 Python scraper）──────────────────
@@ -180,13 +181,29 @@ export async function executeCli(
   params?: object,
   adminIdentityId?: bigint | number | null
 ): Promise<any> {
-  // 如果指定了管理员身份，切换凭证
-  if (adminIdentityId) {
-    await switchToIdentity(adminIdentityId);
+  // 如果未指定管理员身份，从数据库自动任选一个（避免依赖 ~/.qqcli 本地凭证）
+  let resolvedIdentityId = adminIdentityId ?? null;
+  if (!resolvedIdentityId) {
+    const anyIdentity = await prisma.adminIdentity.findFirst({
+      where: { token: { not: null } },
+      select: { id: true },
+      orderBy: { id: "asc" },
+    });
+    if (anyIdentity) {
+      resolvedIdentityId = anyIdentity.id;
+      console.log(`[CLI] Auto-selected admin identity ${resolvedIdentityId} (no identity specified)`);
+    } else {
+      console.warn(`[CLI] No admin identity with token found in DB — CLI may fail with auth errors`);
+    }
+  }
+
+  // 切换凭证（写入临时 .env 文件供 CLI 读取）
+  if (resolvedIdentityId) {
+    await switchToIdentity(resolvedIdentityId);
   }
 
   // 构建环境变量（含凭证路径）
-  const cliEnv = buildCliEnv(adminIdentityId);
+  const cliEnv = buildCliEnv(resolvedIdentityId);
 
   // 请求间隔
   const now = Date.now();
@@ -200,7 +217,7 @@ export async function executeCli(
   const flagArgs = params ? buildFlagArgs(params as Record<string, any>) : [];
   const args = [domain, action, ...flagArgs, "--json", "--yes"];
 
-  console.log(`[CLI] ${domain} ${action}: ${args.join(" ")}` + (adminIdentityId ? ` (identity=${adminIdentityId})` : ""));
+  console.log(`[CLI] ${domain} ${action}: ${args.join(" ")}` + (resolvedIdentityId ? ` (identity=${resolvedIdentityId})` : ""));
 
   // Windows .cmd fallback 解析
   const resolvePath = (base: string): string => {

@@ -151,8 +151,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!targetType || !targetId || !resolvedReason || !actionType) {
-      return error("缺少必要参数：targetType, targetId, violationReason/reasonId, actionType", 400);
+    if (!targetType || !targetId || !resolvedReason || !actionType || !adminIdentityId) {
+      return error("缺少必要参数：targetType, targetId, violationReason/reasonId, actionType, adminIdentityId", 400);
     }
 
     // Always resolve target info from DB for CLI execution

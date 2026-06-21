@@ -119,6 +119,10 @@ export function ViolationDialog({
       toast.error('请选择违规原因');
       return;
     }
+    if (!adminIdentityId) {
+      toast.error('请选择操作身份');
+      return;
+    }
     if (actionType === 'move' && !targetChannel) {
       toast.error('请选择目标版块');
       return;
@@ -190,19 +194,30 @@ export function ViolationDialog({
           <div className="space-y-4">
             {/* Admin identity */}
             <div className="space-y-2">
-              <Label>操作身份</Label>
+              <Label>
+                操作身份 <span className="text-red-500">*</span>
+              </Label>
               <Select value={adminIdentityId} onValueChange={(v) => setAdminIdentityId(v ?? '')}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="选择管理员身份" />
+                <SelectTrigger className={`w-full ${!adminIdentityId && identities.length > 0 ? 'border-red-400' : ''}`}>
+                  <SelectValue placeholder="选择管理员身份（必选）" />
                 </SelectTrigger>
                 <SelectContent>
-                  {identities.map((id) => (
-                    <SelectItem key={id.id} value={String(id.id)}>
-                      {id.name}
+                  {identities.length === 0 ? (
+                    <SelectItem value="" disabled>
+                      暂无可用的管理员身份
                     </SelectItem>
-                  ))}
+                  ) : (
+                    identities.map((id) => (
+                      <SelectItem key={id.id} value={String(id.id)}>
+                        {id.name}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
+              {identities.length === 0 && (
+                <p className="text-xs text-amber-500">系统中没有管理员凭证，请先在设置中添加</p>
+              )}
             </div>
 
             {/* Violation reason */}
