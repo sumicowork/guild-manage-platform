@@ -185,7 +185,6 @@ export async function executeCli(
   let resolvedIdentityId = adminIdentityId ?? null;
   if (!resolvedIdentityId) {
     const anyIdentity = await prisma.adminIdentity.findFirst({
-      where: { token: { not: null } },
       select: { id: true },
       orderBy: { id: "asc" },
     });
