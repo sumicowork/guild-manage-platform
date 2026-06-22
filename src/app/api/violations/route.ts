@@ -385,7 +385,7 @@ export async function POST(req: NextRequest) {
         reason: resolvedReason,
       });
 
-      if (notifType === "comment" && resolvedTargetFeedId) {
+      if (notifType === "reply" && resolvedTargetFeedId) {
         notificationSent = await postComment(resolvedTargetFeedId, GUILD_ID, finalText, feedCreateTimeStr, adminIdentityId);
       } else if (notifType === "dm") {
         notificationSent = await sendDM(GUILD_ID, resolvedTargetAuthorId, finalText, adminIdentityId);
