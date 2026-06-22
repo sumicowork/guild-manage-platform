@@ -8,6 +8,8 @@ import { switchToIdentity, buildCliEnv } from "./credentials";
 const MAX_RETRIES = 5;          // 最大重试次数（含 153）
 const RETRY_DELAY_S = 3;       // 普通重试间隔（秒）
 const RATE_LIMIT_WAIT_S = 30;  // 153 基础等待时间（秒）
+const MAX_IDENTITY_SWITCHES = 3; // 单次请求内最多切换身份次数
+const IDENTITY_SWITCH_DELAY_MS = 2000; // 切换身份后短延迟（毫秒）
 
 // ── 全局 153 连续计数（跨请求退避）──────────────────────────
 let _global153Count = 0;
@@ -16,8 +18,126 @@ let _global153Count = 0;
 const REQUEST_DELAY_MS = Number(process.env.CLI_REQUEST_DELAY_MS) || 1500;
 let lastCallTime = 0;
 
+// ── 身份池缓存（避免每次调用都查 DB）────────────────────────
+interface PoolIdentity {
+  id: bigint;
+  nickname: string;
+}
+
+let _identityPoolCache: PoolIdentity[] = [];
+let _poolCacheTime = 0;
+const POOL_CACHE_TTL_MS = 60_000; // 1 分钟缓存
+
+// ── Per-identity 限流状态追踪 ─────────────────────────────
+interface IdentityRateLimitState {
+  consecutive153: number;   // 连续 153 计数
+  cooldownUntil: number;    // 冷却到期时间戳 (ms)
+}
+const _identityStates = new Map<string, IdentityRateLimitState>();
+
+// ── Round-robin 计数器 ────────────────────────────────────
+let _roundRobinIndex = 0;
+
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// ── 身份池管理 ─────────────────────────────────────────────
+
+/**
+ * 获取有 token 的管理员身份池（带缓存）。
+ * 用于自动选择和 153 切换。
+ */
+async function getIdentityPool(): Promise<PoolIdentity[]> {
+  const now = Date.now();
+  if (now - _poolCacheTime < POOL_CACHE_TTL_MS && _identityPoolCache.length > 0) {
+    return _identityPoolCache;
+  }
+  _identityPoolCache = await prisma.adminIdentity.findMany({
+    where: { status: "active", token: { not: "" } },
+    select: { id: true, nickname: true },
+    orderBy: { id: "asc" },
+  });
+  _poolCacheTime = now;
+  return _identityPoolCache;
+}
+
+/** 使身份池缓存失效（如新增/删除身份后调用） */
+export function invalidateIdentityPool(): void {
+  _identityPoolCache = [];
+  _poolCacheTime = 0;
+}
+
+// ── Per-identity 限流状态 ──────────────────────────────────
+
+function getIdentityState(id: bigint | number): IdentityRateLimitState {
+  const key = String(id);
+  let state = _identityStates.get(key);
+  if (!state) {
+    state = { consecutive153: 0, cooldownUntil: 0 };
+    _identityStates.set(key, state);
+  }
+  return state;
+}
+
+function isIdentityInCooldown(id: bigint | number): boolean {
+  const state = _identityStates.get(String(id));
+  if (!state) return false;
+  return Date.now() < state.cooldownUntil;
+}
+
+/**
+ * 标记身份进入冷却。
+ * 退避时长 = 30s × 2^(consecutive-1)，连续 >3 时至少 300s。
+ */
+function markIdentityCooldown(id: bigint | number, consecutive: number): void {
+  const state = getIdentityState(id);
+  state.consecutive153 = consecutive;
+  let cooldownS = RATE_LIMIT_WAIT_S * Math.pow(2, consecutive - 1);
+  if (consecutive > 3) cooldownS = Math.max(cooldownS, 300);
+  state.cooldownUntil = Date.now() + cooldownS * 1000;
+}
+
+function resetIdentityCooldown(id: bigint | number): void {
+  const state = _identityStates.get(String(id));
+  if (state) {
+    state.consecutive153 = 0;
+    state.cooldownUntil = 0;
+  }
+}
+
+// ── 自动选择身份（Round-Robin）─────────────────────────────
+
+/**
+ * Round-robin 选择一个不在冷却中的身份。
+ * 全部冷却时选冷却最快到期的。
+ */
+async function autoSelectIdentity(): Promise<PoolIdentity | null> {
+  const pool = await getIdentityPool();
+  if (pool.length === 0) return null;
+
+  // 从 round-robin 起点开始，找不在冷却中的身份
+  for (let i = 0; i < pool.length; i++) {
+    const idx = (_roundRobinIndex + i) % pool.length;
+    const candidate = pool[idx];
+    if (!isIdentityInCooldown(candidate.id)) {
+      _roundRobinIndex = idx + 1; // 下次从下一个开始
+      return candidate;
+    }
+  }
+
+  // 全部冷却中 → 选冷却最快到期的
+  let earliest: PoolIdentity | null = null;
+  let earliestExpiry = Infinity;
+  for (const p of pool) {
+    const state = _identityStates.get(String(p.id));
+    const expiry = state?.cooldownUntil ?? 0;
+    if (expiry < earliestExpiry) {
+      earliestExpiry = expiry;
+      earliest = p;
+    }
+  }
+  return earliest;
 }
 
 // ── 工具函数 ─────────────────────────────────────────────
@@ -158,17 +278,17 @@ function executeOnce(cliPath: string, args: string[], customEnv?: NodeJS.Process
 // ── 核心 executor ────────────────────────────────────────
 
 /**
- * Core CLI executor.
+ * Core CLI executor with identity rotation on 153 rate-limit.
  *
  * Executes: `<cli> <domain> <action> [--flags...] --json`
  *
  * Parameters are passed as command-line flags (snake_case → --kebab-case).
  *
- * Rate-limit (153) handling — mirrors Python guild_scraper.py:
- *  - Exponential backoff: 30s × 2^(n-1) per consecutive 153
- *  - Global counter across all requests; >3 → deep cooldown (300s+)
- *  - Up to MAX_RETRIES (5) attempts
- *  - Success resets global counter
+ * Rate-limit (153) handling:
+ *  - Layer 1: Auto-switch to another identity on 153, retry with 2s delay
+ *  - Layer 2: Per-identity cooldown tracking (30s × 2^(n-1), deep 300s)
+ *  - Layer 3: Round-robin identity selection for load distribution
+ *  - Fallback: exponential backoff when all identities in cooldown
  *
  * Other error codes:
  *  - 151 (auth retry): retry with 3s delay
@@ -181,28 +301,28 @@ export async function executeCli(
   params?: object,
   adminIdentityId?: bigint | number | null
 ): Promise<any> {
-  // 如果未指定管理员身份，从数据库自动任选一个（避免依赖 ~/.qqcli 本地凭证）
-  let resolvedIdentityId = adminIdentityId ?? null;
-  if (!resolvedIdentityId) {
-    const anyIdentity = await prisma.adminIdentity.findFirst({
-      select: { id: true },
-      orderBy: { id: "asc" },
-    });
-    if (anyIdentity) {
-      resolvedIdentityId = anyIdentity.id;
-      console.log(`[CLI] Auto-selected admin identity ${resolvedIdentityId} (no identity specified)`);
+  // ── 身份选择 ──
+  // 如果调用方指定了身份，直接使用；否则 round-robin 自动选择
+  const userSpecifiedIdentity = !!adminIdentityId;
+  let currentIdentityId: bigint | number | null = adminIdentityId ?? null;
+
+  if (!currentIdentityId) {
+    const selected = await autoSelectIdentity();
+    if (selected) {
+      currentIdentityId = selected.id;
+      console.log(`[CLI] Round-robin selected identity ${currentIdentityId} (${selected.nickname})`);
     } else {
       console.warn(`[CLI] No admin identity with token found in DB — CLI may fail with auth errors`);
     }
   }
 
   // 切换凭证（写入临时 .env 文件供 CLI 读取）
-  if (resolvedIdentityId) {
-    await switchToIdentity(resolvedIdentityId);
+  if (currentIdentityId) {
+    await switchToIdentity(currentIdentityId);
   }
 
-  // 构建环境变量（含凭证路径）
-  const cliEnv = buildCliEnv(resolvedIdentityId);
+  // 构建环境变量（含凭证路径）— let 因为 153 切换时需要重建
+  let cliEnv = buildCliEnv(currentIdentityId);
 
   // 请求间隔
   const now = Date.now();
@@ -216,7 +336,7 @@ export async function executeCli(
   const flagArgs = params ? buildFlagArgs(params as Record<string, any>) : [];
   const args = [domain, action, ...flagArgs, "--json", "--yes"];
 
-  console.log(`[CLI] ${domain} ${action}: ${args.join(" ")}` + (resolvedIdentityId ? ` (identity=${resolvedIdentityId})` : ""));
+  console.log(`[CLI] ${domain} ${action}: ${args.join(" ")}` + (currentIdentityId ? ` (identity=${currentIdentityId})` : ""));
 
   // Windows .cmd fallback 解析
   const resolvePath = (base: string): string => {
@@ -231,7 +351,8 @@ export async function executeCli(
     return base;
   };
 
-  let rateLimitStreak = 0; // 本次请求内连续 153 计数
+  let rateLimitStreak = 0;      // 当前身份连续 153 计数
+  let identitySwitchCount = 0;  // 本次请求内身份切换次数
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const cliPath = resolvePath(cliBase);
@@ -245,15 +366,53 @@ export async function executeCli(
 
     // ── 成功 ──
     if (result.code === 0) {
-      _global153Count = 0; // 成功重置全局计数
+      _global153Count = 0;
+      if (currentIdentityId) resetIdentityCooldown(currentIdentityId);
       return result.data;
     }
 
-    // ── 153 限流：指数退避 + 全局深度冷却 ──
+    // ── 153 限流：优先切换身份，否则指数退避 ──
     if (result.code === CliErrorCode.RATE_LIMIT) {
       rateLimitStreak++;
       _global153Count++;
 
+      // 标记当前身份进入冷却
+      if (currentIdentityId) {
+        markIdentityCooldown(currentIdentityId, rateLimitStreak);
+      }
+
+      // Layer 1: 尝试切换到其他身份（仅在未手动指定身份 或 允许自动切换时）
+      if (identitySwitchCount < MAX_IDENTITY_SWITCHES) {
+        const pool = await getIdentityPool();
+        const alternate = pool.find(
+          (p) => p.id !== currentIdentityId && !isIdentityInCooldown(p.id)
+        );
+
+        if (alternate) {
+          identitySwitchCount++;
+          console.log(
+            `[CLI][限流] 153 on identity ${currentIdentityId}, ` +
+            `switching to ${alternate.id} (${alternate.nickname}) ` +
+            `[switch #${identitySwitchCount}]`
+          );
+
+          // 切换身份
+          currentIdentityId = alternate.id;
+          await switchToIdentity(currentIdentityId);
+          cliEnv = buildCliEnv(currentIdentityId);
+          rateLimitStreak = 0; // 新身份重置 streak
+
+          await delay(IDENTITY_SWITCH_DELAY_MS);
+          lastCallTime = Date.now();
+          continue;
+        }
+
+        console.warn(
+          `[CLI][限流] No alternate identity available (all in cooldown or pool exhausted)`
+        );
+      }
+
+      // Layer 2 fallback: 无可用身份，走指数退避
       let waitS = RATE_LIMIT_WAIT_S * Math.pow(2, rateLimitStreak - 1);
       if (_global153Count > 3) {
         waitS = Math.max(waitS, 300);
@@ -262,7 +421,8 @@ export async function executeCli(
         );
       } else {
         console.warn(
-          `[CLI][限流] 153 #${rateLimitStreak}，等待 ${waitS}s (尝试 ${attempt}/${MAX_RETRIES})`
+          `[CLI][限流] 153 #${rateLimitStreak} (identity ${currentIdentityId})，` +
+          `等待 ${waitS}s (尝试 ${attempt}/${MAX_RETRIES})`
         );
       }
 
@@ -271,6 +431,7 @@ export async function executeCli(
         lastCallTime = Date.now();
         continue;
       }
+
       // 重试耗尽
       throw new CliError(
         `CLI ${domain} ${action} rate-limited after ${MAX_RETRIES} retries`,
