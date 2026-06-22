@@ -21,15 +21,11 @@ export async function GET(req: NextRequest) {
     const authorId = searchParams.get("authorId")?.trim() || undefined;
 
     const where: Prisma.FeedWhereInput = {};
+    const andConditions: Prisma.FeedWhereInput[] = [];
 
     // Status filter
     if (status) {
       where.status = status;
-    }
-
-    // Channel filter (channelId is numeric ID from frontend)
-    if (channelId) {
-      where.channel_id = channelId;
     }
 
     // Author filter
@@ -37,14 +33,26 @@ export async function GET(req: NextRequest) {
       where.author_id = authorId;
     }
 
+    // Channel filter: match by channel_id or channel_name (some channels only have name)
+    if (channelId) {
+      andConditions.push({
+        OR: [
+          { channel_id: channelId },
+          { channel_name: channelId },
+        ],
+      });
+    }
+
     // Search filter
     if (search) {
-      where.OR = [
-        { title: { contains: search, mode: "insensitive" } },
-        { author: { contains: search, mode: "insensitive" } },
-        { feed_id: { contains: search, mode: "insensitive" } },
-        { content: { contains: search, mode: "insensitive" } },
-      ];
+      andConditions.push({
+        OR: [
+          { title: { contains: search, mode: "insensitive" } },
+          { author: { contains: search, mode: "insensitive" } },
+          { feed_id: { contains: search, mode: "insensitive" } },
+          { content: { contains: search, mode: "insensitive" } },
+        ],
+      });
     }
 
     // Date range filter
@@ -56,6 +64,11 @@ export async function GET(req: NextRequest) {
       if (dateTo) {
         where.create_time.lte = new Date(dateTo + "T23:59:59.999Z");
       }
+    }
+
+    // Combine AND conditions with simple filters
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
     }
 
     // Sort
@@ -92,7 +105,7 @@ export async function GET(req: NextRequest) {
         likeCount: preferCount ?? 0,
         commentCount: f.commentCount ?? 0,
         createdAt: f.createTime ?? f.createdAt,
-        channelId: '',
+        channelId: f.channelId ?? '',
       };
     });
     return success(mapped, {

@@ -9,14 +9,14 @@ export async function GET(req: NextRequest) {
 
     // Get channels: prefer numeric channel_id, fallback to name-based
     const feedsWithId = await prisma.feed.findMany({
-      where: { status: "active", channel_id: { not: null } },
+      where: { channel_id: { not: null } },
       select: { channel_id: true, channel_name: true },
       distinct: ["channel_id"],
       orderBy: { channel_name: "asc" },
     });
 
     const feedsWithoutId = await prisma.feed.findMany({
-      where: { status: "active", channel_id: null, channel_name: { not: null } },
+      where: { channel_id: null, channel_name: { not: null } },
       select: { channel_name: true },
       distinct: ["channel_name"],
       orderBy: { channel_name: "asc" },
