@@ -9,7 +9,6 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { ThumbsUp, MessageCircle, Clock, AlertTriangle, CornerDownRight } from 'lucide-react';
 
 interface Reply {
@@ -199,7 +198,7 @@ export function FeedDetail({
           <DialogTitle className="text-base">{feed.title || '(无标题)'}</DialogTitle>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 -mx-4 px-4">
+        <div className="flex-1 overflow-y-auto min-h-0 -mx-4 px-4">
           <div className="space-y-4">
             {/* Meta */}
             <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
@@ -278,7 +277,7 @@ export function FeedDetail({
               )}
             </div>
           </div>
-        </ScrollArea>
+        </div>
       </DialogContent>
     </Dialog>
   );

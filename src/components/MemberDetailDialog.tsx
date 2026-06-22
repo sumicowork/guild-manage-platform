@@ -11,7 +11,6 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
@@ -144,7 +143,7 @@ export function MemberDetailDialog({ tinyid, open, onOpenChange }: MemberDetailD
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 -mx-4 px-4">
+        <div className="flex-1 overflow-y-auto min-h-0 -mx-4 px-4">
           {loading ? (
             <div className="space-y-3">
               <Skeleton className="h-16 w-full rounded-lg bg-gray-200" />
@@ -185,10 +184,10 @@ export function MemberDetailDialog({ tinyid, open, onOpenChange }: MemberDetailD
                   >
                     {tab.label}
                     <span className="ml-1 text-[10px] opacity-60">
-                      {tab.key === 'feeds' ? data.feeds.length :
-                       tab.key === 'comments' ? data.comments.length :
-                       tab.key === 'replies' ? data.replies.length :
-                       data.violations.length}
+                      {tab.key === 'feeds' ? data.stats.feedCount :
+                       tab.key === 'comments' ? data.stats.commentCount :
+                       tab.key === 'replies' ? data.stats.replyCount :
+                       data.stats.violationCount}
                     </span>
                   </Button>
                 ))}
@@ -305,7 +304,7 @@ export function MemberDetailDialog({ tinyid, open, onOpenChange }: MemberDetailD
           ) : (
             <p className="py-8 text-center text-sm text-gray-400">加载失败</p>
           )}
-        </ScrollArea>
+        </div>
       </DialogContent>
     </Dialog>
   );
