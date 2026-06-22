@@ -10,10 +10,9 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Download } from 'lucide-react';
+import { Download, Trash2 } from 'lucide-react';
 
 interface Violation {
   id: number;
@@ -129,6 +128,17 @@ export default function ViolationsPage() {
     }
   };
 
+  const handleDelete = async (id: number) => {
+    if (!window.confirm('确定要删除这条违规记录吗？此操作不可撤销。')) return;
+    try {
+      await api.delete(`/violations/${id}`);
+      toast.success('违规记录已删除');
+      fetchViolations();
+    } catch {
+      toast.error('删除失败');
+    }
+  };
+
   const columns: Column<Violation>[] = [
     {
       key: 'createdAt',
@@ -188,6 +198,22 @@ export default function ViolationsPage() {
         <span className="text-xs text-gray-500">{v.identityName || '-'}</span>
       ),
     },
+    {
+      key: 'id' as const,
+      header: '',
+      width: '50px',
+      align: 'center',
+      render: (v) => (
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="text-gray-400 hover:text-red-500 hover:bg-red-50"
+          onClick={(e) => { e.stopPropagation(); handleDelete(v.id); }}
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      ),
+    },
   ];
 
   return (
@@ -204,7 +230,7 @@ export default function ViolationsPage() {
       <div className="flex flex-wrap items-center gap-3">
         <Select value={reasonFilter} onValueChange={(v) => { setReasonFilter(v ?? ''); setPage(1); }}>
           <SelectTrigger>
-            <SelectValue placeholder="全部原因" />
+            <span className="text-sm truncate max-w-[140px]">{reasonFilter || '全部原因'}</span>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="">全部原因</SelectItem>
@@ -217,7 +243,7 @@ export default function ViolationsPage() {
         </Select>
         <Select value={actionFilter} onValueChange={(v) => { setActionFilter(v ?? ''); setPage(1); }}>
           <SelectTrigger>
-            <SelectValue placeholder="全部处置" />
+            <span className="text-sm">{{ '': '全部处置', move: '移帖', delete: '删帖', delete_comment: '删评论' }[actionFilter] || '全部处置'}</span>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="">全部处置</SelectItem>
@@ -228,7 +254,7 @@ export default function ViolationsPage() {
         </Select>
         <Select value={operatorFilter} onValueChange={(v) => { setOperatorFilter(v ?? ''); setPage(1); }}>
           <SelectTrigger>
-            <SelectValue placeholder="全部操作人" />
+            <span className="text-sm truncate max-w-[140px]">{operatorFilter || '全部操作人'}</span>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="">全部操作人</SelectItem>

@@ -4,6 +4,8 @@ import { promisify } from "util";
 import fs from "fs";
 import path from "path";
 import { getAuthUser, unauthorized, forbidden, success, error } from "@/lib/api-utils";
+import { prisma } from "@/lib/db";
+import { switchToIdentity, buildCliEnv } from "@/lib/cli/credentials";
 
 const execFileAsync = promisify(execFile);
 
@@ -37,13 +39,15 @@ function resolveCliPath(): string {
  */
 async function runCliJson(
   args: string[],
-  timeoutMs = 15000
+  timeoutMs = 15000,
+  envOverride?: NodeJS.ProcessEnv
 ): Promise<any | null> {
   const cliPath = resolveCliPath();
+  const env = envOverride || { ...process.env };
   try {
     const { stdout } = await execFileAsync(cliPath, args, {
       timeout: timeoutMs,
-      env: { ...process.env },
+      env,
       maxBuffer: 10 * 1024 * 1024,
     });
     return JSON.parse(stdout.trim());
@@ -59,7 +63,7 @@ async function runCliJson(
       try {
         const { stdout } = await execFileAsync(cliPath + ".cmd", args, {
           timeout: timeoutMs,
-          env: { ...process.env },
+          env,
           maxBuffer: 10 * 1024 * 1024,
         });
         return JSON.parse(stdout.trim());
@@ -92,10 +96,27 @@ export async function GET(req: NextRequest) {
     if (!auth) return unauthorized();
     if (auth.role !== "admin") return forbidden();
 
+    // 从 DB 自动选取第一个有 token 的管理员身份
+    let identityName: string | null = null;
+    const anyIdentity = await prisma.adminIdentity.findFirst({
+      where: { token: { not: "" } },
+      select: { id: true, nickname: true },
+      orderBy: { id: "asc" },
+    });
+
+    if (anyIdentity) {
+      await switchToIdentity(anyIdentity.id);
+      identityName = anyIdentity.nickname;
+    } else {
+      console.warn("[CLI status] No admin identity with token found in DB");
+    }
+
+    const cliEnv = anyIdentity ? buildCliEnv(anyIdentity.id) : { ...process.env };
+
     // Run doctor and login status in parallel
     const [doctorResult, loginStatusResult] = await Promise.allSettled([
-      runCliJson(["doctor", "--json"], 15000),
-      runCliJson(["login", "status", "--json"], 10000),
+      runCliJson(["doctor", "--json"], 15000, cliEnv),
+      runCliJson(["login", "status", "--json"], 10000, cliEnv),
     ]);
 
     const doctor = doctorResult.status === "fulfilled" ? doctorResult.value : null;
@@ -133,6 +154,7 @@ export async function GET(req: NextRequest) {
       version,
       loggedIn,
       loginStatus: loginStatus?.data || null,
+      identityName,
       environment: {
         cliPath: process.env.CLI_PATH || "tencent-channel-cli",
         cliRequestDelayMs: process.env.CLI_REQUEST_DELAY_MS || "500",

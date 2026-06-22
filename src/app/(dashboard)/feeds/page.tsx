@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api-client';
 import { FeedDetail } from '@/components/FeedDetail';
 import { ViolationDialog } from '@/components/ViolationDialog';
+import { MemberDetailDialog } from '@/components/MemberDetailDialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +13,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import {
@@ -105,6 +105,8 @@ export default function FeedsPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [sortField, setSortField] = useState('createdAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [channels, setChannels] = useState<Channel[]>([]);
 
   const [selectedFeed, setSelectedFeed] = useState<Feed | null>(null);
@@ -113,6 +115,9 @@ export default function FeedsPage() {
 
   const [violationOpen, setViolationOpen] = useState(false);
   const [violationTarget, setViolationTarget] = useState<ViolationTarget | null>(null);
+
+  const [memberTinyid, setMemberTinyid] = useState<string | null>(null);
+  const [memberOpen, setMemberOpen] = useState(false);
 
   const pageSize = 20;
 
@@ -128,6 +133,8 @@ export default function FeedsPage() {
       if (search) params.set('search', search);
       if (channelFilter) params.set('channelId', channelFilter);
       if (statusFilter) params.set('status', statusFilter);
+      if (dateFrom) params.set('dateFrom', dateFrom);
+      if (dateTo) params.set('dateTo', dateTo);
 
       const result = await api.get<FeedListResponse>(`/feeds?${params}`);
       setFeeds(result.data);
@@ -137,7 +144,7 @@ export default function FeedsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, channelFilter, statusFilter, sortField, sortDir]);
+  }, [page, search, channelFilter, statusFilter, sortField, sortDir, dateFrom, dateTo]);
 
   useEffect(() => {
     fetchFeeds();
@@ -200,7 +207,7 @@ export default function FeedsPage() {
         </div>
         <Select value={channelFilter} onValueChange={(v) => { setChannelFilter(v ?? ''); setPage(1); }}>
           <SelectTrigger>
-            <SelectValue placeholder="全部版块" />
+            <span className="text-sm truncate">{channelFilter ? (channels.find(c => c.id === channelFilter)?.name || '全部版块') : '全部版块'}</span>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="">全部版块</SelectItem>
@@ -213,7 +220,7 @@ export default function FeedsPage() {
         </Select>
         <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v ?? ''); setPage(1); }}>
           <SelectTrigger>
-            <SelectValue placeholder="全部状态" />
+            <span className="text-sm">{{ '': '全部状态', active: '正常', deleted: '已删除', moved: '已移帖' }[statusFilter] || '全部状态'}</span>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="">全部状态</SelectItem>
@@ -224,7 +231,7 @@ export default function FeedsPage() {
         </Select>
         <Select value={sortField} onValueChange={(v) => { setSortField(v ?? 'createdAt'); setPage(1); }}>
           <SelectTrigger className="w-[120px]">
-            <SelectValue placeholder="排序" />
+            <span className="text-sm">{{ createdAt: '按时间', likeCount: '按点赞', commentCount: '按评论' }[sortField] || '排序'}</span>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="createdAt">按时间</SelectItem>
@@ -240,6 +247,21 @@ export default function FeedsPage() {
         >
           {sortDir === 'desc' ? '↓ 降序' : '↑ 升序'}
         </Button>
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+          className="h-8 rounded-lg border border-gray-200 bg-white px-2 text-xs text-gray-700 outline-none focus:border-blue-300"
+          title="开始日期"
+        />
+        <span className="text-xs text-gray-400">至</span>
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+          className="h-8 rounded-lg border border-gray-200 bg-white px-2 text-xs text-gray-700 outline-none focus:border-blue-300"
+          title="结束日期"
+        />
       </div>
 
       {/* Card-based Feed List */}
@@ -267,7 +289,7 @@ export default function FeedsPage() {
             >
               {/* Header row */}
               <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
-                <span className="font-medium text-gray-900">{feed.author}</span>
+                <span className="font-medium text-gray-900 hover:text-blue-600 cursor-pointer" onClick={(e) => { e.stopPropagation(); setMemberTinyid(feed.authorId); setMemberOpen(true); }}>{feed.author}</span>
                 <span>·</span>
                 <span>{feed.channelName}</span>
                 <span>·</span>
@@ -383,6 +405,13 @@ export default function FeedsPage() {
           targetFeedId={violationTarget.feedId}
         />
       )}
+
+      {/* Member Detail Dialog */}
+      <MemberDetailDialog
+        tinyid={memberTinyid}
+        open={memberOpen}
+        onOpenChange={setMemberOpen}
+      />
     </div>
   );
 }

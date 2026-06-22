@@ -20,7 +20,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
@@ -199,7 +198,7 @@ export function ViolationDialog({
               </Label>
               <Select value={adminIdentityId} onValueChange={(v) => setAdminIdentityId(v ?? '')}>
                 <SelectTrigger className={`w-full ${!adminIdentityId && identities.length > 0 ? 'border-red-400' : ''}`}>
-                  <SelectValue placeholder="选择管理员身份（必选）" />
+                  <span className="text-sm">{adminIdentityId ? (identities.find(i => String(i.id) === adminIdentityId)?.name || '选择管理员身份') : '选择管理员身份（必选）'}</span>
                 </SelectTrigger>
                 <SelectContent>
                   {identities.length === 0 ? (
@@ -225,7 +224,7 @@ export function ViolationDialog({
               <Label>违规原因 *</Label>
               <Select value={selectedReasonId} onValueChange={(v) => setSelectedReasonId(v ?? '')}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="选择违规原因" />
+                  <span className="text-sm">{selectedReasonId ? (reasons.find(r => String(r.id) === selectedReasonId)?.name || '选择违规原因') : '选择违规原因'}</span>
                 </SelectTrigger>
                 <SelectContent>
                   {reasons.map((r) => (
@@ -272,7 +271,7 @@ export function ViolationDialog({
                 <Label>目标版块</Label>
                 <Select value={targetChannel} onValueChange={(v) => setTargetChannel(v ?? '')}>
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="选择目标版块" />
+                    <span className="text-sm">{targetChannel ? (channels.find(c => c.id === targetChannel)?.name || '选择目标版块') : '选择目标版块'}</span>
                   </SelectTrigger>
                   <SelectContent>
                     {channels.map((ch) => (
@@ -295,7 +294,7 @@ export function ViolationDialog({
                 <Label>禁言时长</Label>
                 <Select value={muteDuration} onValueChange={(v) => setMuteDuration(v ?? '24h')}>
                   <SelectTrigger className="w-full">
-                    <SelectValue />
+                    <span className="text-sm">{{ '24h': '24小时', '7d': '7天', '30d': '30天', permanent: '永久' }[muteDuration] || '24小时'}</span>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="24h">24小时</SelectItem>

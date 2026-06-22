@@ -12,13 +12,23 @@ export async function GET(req: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "20", 10)));
     const search = searchParams.get("search")?.trim() || undefined;
-    const status = searchParams.get("status") || "active";
+    const status = searchParams.get("status")?.trim() || undefined;
     const tag = searchParams.get("tag")?.trim() || undefined;
+    const role = searchParams.get("role")?.trim() || undefined;
+    const sort = searchParams.get("sort") || "createdAt";
+    const direction = searchParams.get("direction") || "desc";
 
     const where: Prisma.MemberWhereInput = {};
 
-    // Status filter
-    where.status = status;
+    // Status filter (no default — empty means all)
+    if (status) {
+      where.status = status;
+    }
+
+    // Role filter
+    if (role) {
+      where.role = role;
+    }
 
     // Tag filter
     if (tag) {
@@ -36,23 +46,52 @@ export async function GET(req: NextRequest) {
       ];
     }
 
-    const [members, total] = await Promise.all([
-      prisma.member.findMany({
+    // For DB-level sortable fields, use Prisma orderBy directly.
+    // For computed fields (feedCount, commentCount), we sort in JS after enrichment.
+    const isComputedSort = sort === "feedCount" || sort === "commentCount";
+
+    let orderBy: Prisma.MemberOrderByWithRelationInput;
+    if (!isComputedSort) {
+      switch (sort) {
+        case "joinedAt":
+          orderBy = { join_time: direction === "asc" ? "asc" : "desc" };
+          break;
+        case "createdAt":
+        default:
+          orderBy = { created_at: direction === "asc" ? "asc" : "desc" };
+          break;
+      }
+    } else {
+      // Default ordering for computed sorts — we'll sort in JS
+      orderBy = { created_at: "desc" };
+    }
+
+    // For computed sorts we need all matching records; for DB sorts, paginate normally
+    const total = await prisma.member.count({ where });
+
+    let members;
+    if (isComputedSort) {
+      // Fetch all matching members (guilds are typically small enough)
+      members = await prisma.member.findMany({
         where,
-        orderBy: { created_at: "desc" },
+        orderBy,
+        include: {
+          tags: true,
+          _count: { select: { violations: true } },
+        },
+      });
+    } else {
+      members = await prisma.member.findMany({
+        where,
+        orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
           tags: true,
-          _count: {
-            select: {
-              violations: true,
-            },
-          },
+          _count: { select: { violations: true } },
         },
-      }),
-      prisma.member.count({ where }),
-    ]);
+      });
+    }
 
     // Enrich members with post/comment counts
     const memberIds = members.map((m) => m.tinyid);
@@ -83,7 +122,22 @@ export async function GET(req: NextRequest) {
       commentCount: commentCountMap.get(m.tinyid) || 0,
     }));
 
-    const rawEnriched = serializeBigInt(enriched);
+    // In-memory sort for computed fields
+    if (isComputedSort) {
+      const dir = direction === "asc" ? 1 : -1;
+      enriched.sort((a, b) => {
+        const aVal = sort === "feedCount" ? a.postCount : a.commentCount;
+        const bVal = sort === "feedCount" ? b.postCount : b.commentCount;
+        return (aVal - bVal) * dir;
+      });
+    }
+
+    // Manual pagination for computed sorts
+    const paginated = isComputedSort
+      ? enriched.slice((page - 1) * pageSize, page * pageSize)
+      : enriched;
+
+    const rawEnriched = serializeBigInt(paginated);
     const camelEnriched = toCamelCase(rawEnriched) as any[];
     const mapped = camelEnriched.map((m: any) => ({
       ...m,

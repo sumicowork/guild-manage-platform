@@ -27,9 +27,9 @@ export async function GET(req: NextRequest) {
       where.status = status;
     }
 
-    // Channel filter
+    // Channel filter (channelId is numeric ID from frontend)
     if (channelId) {
-      where.channel_name = channelId;
+      where.channel_id = channelId;
     }
 
     // Author filter

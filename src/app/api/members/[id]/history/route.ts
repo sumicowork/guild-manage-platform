@@ -47,6 +47,27 @@ export async function GET(
       },
     });
 
+    // Fetch reply history
+    const replies = await prisma.reply.findMany({
+      where: { author_id: member.tinyid },
+      orderBy: { create_time: "desc" },
+      take: 50,
+      include: {
+        comment: {
+          select: {
+            comment_id: true,
+            content_text: true,
+            feed: {
+              select: {
+                feed_id: true,
+                title: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
     // Fetch violation history targeting this member
     const violations = await prisma.violation.findMany({
       where: { target_author_id: member.tinyid },
@@ -54,23 +75,68 @@ export async function GET(
       take: 50,
     });
 
+    // Compute aggregate stats
+    const [totalLikes, feedCount, commentCount, replyCount] = await Promise.all([
+      prisma.feed.aggregate({
+        where: { author_id: member.tinyid },
+        _sum: { prefer_count: true },
+      }),
+      prisma.feed.count({ where: { author_id: member.tinyid } }),
+      prisma.comment.count({ where: { author_id: member.tinyid } }),
+      prisma.reply.count({ where: { author_id: member.tinyid } }),
+    ]);
+
     // Transform to match client's MemberHistory interface
     const rawPosts = toCamelCase(serializeBigInt(posts)) as any[];
     const rawComments = toCamelCase(serializeBigInt(comments)) as any[];
+    const rawReplies = toCamelCase(serializeBigInt(replies)) as any[];
     const rawViolations = toCamelCase(serializeBigInt(violations)) as any[];
+    const rawMember = toCamelCase(serializeBigInt(member)) as any;
 
     const result = {
+      member: {
+        tinyid: rawMember.tinyid,
+        nickname: rawMember.nickname,
+        globalNickname: rawMember.globalNickname,
+        role: rawMember.role,
+        status: rawMember.status,
+        joinedAt: rawMember.joinTime,
+      },
+      stats: {
+        feedCount,
+        commentCount,
+        replyCount,
+        likeCount: totalLikes._sum.prefer_count ?? 0,
+        violationCount: violations.length,
+      },
       feeds: rawPosts.map((p: any) => ({
         id: String(p.id),
+        feedId: p.feedId,
         title: p.title,
+        content: p.content?.slice(0, 100) ?? '',
         createdAt: p.createTime,
         status: p.status,
+        likeCount: p.preferCount ?? 0,
+        commentCount: p.commentCount ?? 0,
       })),
       comments: rawComments.map((c: any) => ({
         id: String(c.id),
+        commentId: c.commentId,
         content: c.contentText || c.content,
         createdAt: c.createTime,
+        feedId: c.feed?.feedId ?? '',
         feedTitle: c.feed?.title ?? '',
+        likeCount: c.preferCount ?? 0,
+      })),
+      replies: rawReplies.map((r: any) => ({
+        id: String(r.id),
+        replyId: r.replyId,
+        content: r.contentText || r.content,
+        createdAt: r.createTime,
+        feedId: r.comment?.feed?.feedId ?? '',
+        feedTitle: r.comment?.feed?.title ?? '',
+        commentContent: r.comment?.contentText?.slice(0, 50) ?? '',
+        targetUser: r.targetUser,
       })),
       violations: rawViolations.map((v: any) => ({
         id: Number(v.id),

@@ -57,6 +57,7 @@ interface CliStatus {
   version: string | null;
   loggedIn: boolean;
   loginStatus: { valid?: boolean; tokenSource?: string; message?: string } | null;
+  identityName: string | null;
   environment: {
     cliPath: string;
     cliRequestDelayMs: string;
@@ -588,6 +589,11 @@ export default function SettingsPage() {
                   <span className="text-sm text-gray-700">
                     {cliStatus.loggedIn ? '已认证' : '未认证'}
                   </span>
+                  {cliStatus.identityName && (
+                    <span className="text-xs text-gray-400">
+                      (身份: {cliStatus.identityName})
+                    </span>
+                  )}
                   {cliStatus.loginStatus?.tokenSource && (
                     <span className="text-xs text-gray-400">
                       ({cliStatus.loginStatus.tokenSource})

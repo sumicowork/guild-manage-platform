@@ -14,7 +14,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from '@/components/ui/select';
 
 interface AdminIdentity {
@@ -282,7 +281,7 @@ export default function CrawlPage() {
         <div className="flex items-center gap-2">
           <Select value={adminIdentityId} onValueChange={(v) => setAdminIdentityId(v ?? '')}>
             <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder="操作身份" />
+              <span className="text-sm truncate">{adminIdentityId ? (identities.find(i => String(i.id) === adminIdentityId)?.name || '操作身份') : '操作身份'}</span>
             </SelectTrigger>
             <SelectContent>
               {identities.map((id) => (
