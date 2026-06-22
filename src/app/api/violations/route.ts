@@ -7,6 +7,22 @@ import { muteUser, kickUser, sendDM } from "@/lib/cli/member";
 
 const GUILD_ID = process.env.GUILD_ID || "82203161765285899";
 
+/** Parse mute duration string to seconds. Supports: "24h", "7d", "30d", "permanent", plain number (hours) */
+function parseDurationToSeconds(duration: string): number {
+  if (duration === "permanent") return 60 * 60 * 24 * 365 * 10; // ~10 years
+  const match = duration.match(/^(\d+)\s*(h|d|hour|day)?$/i);
+  if (!match) return 24 * 3600; // default 24h
+  const num = parseInt(match[1], 10);
+  const unit = (match[2] || "h").toLowerCase();
+  if (unit.startsWith("d")) return num * 86400;
+  return num * 3600;
+}
+
+/** Check if a string is a numeric ID */
+function isNumericId(s: string | null | undefined): boolean {
+  return !!s && /^\d+$/.test(s);
+}
+
 /** Resolve notification template variables */
 function resolveTemplate(
   template: string,
@@ -281,18 +297,25 @@ export async function POST(req: NextRequest) {
     const cliResults: string[] = [];
     const isMove = actionType.includes("move");
     const isDelete = actionType.includes("delete");
-    const isMute = actionType.includes("mute");
+    const shouldMute = !!mute?.duration;
     const feedCreateTimeStr = targetCreateTimeRaw ? String(targetCreateTimeRaw) : "";
 
     if (isMove && targetType === "feed" && resolvedTargetFeedId && targetChannel) {
-      const ok = await movePost(GUILD_ID, resolvedTargetFeedId, targetChannel, targetChannelId || targetChannelName || "", adminIdentityId);
-      cliResults.push(ok ? "移帖成功" : "移帖失败");
-      // Update feed status in DB
-      if (ok) {
-        await prisma.feed.update({
-          where: { feed_id: resolvedTargetFeedId },
-          data: { status: "moved" },
-        });
+      // move-feed requires numeric IDs for both target and original channel
+      const originalChannel = targetChannelId || "";
+      if (!isNumericId(targetChannel)) {
+        cliResults.push(`移帖失败: 目标版块 "${targetChannel}" 没有数字ID，无法执行移帖`);
+      } else if (!isNumericId(originalChannel)) {
+        cliResults.push("移帖失败: 帖子当前版块没有数字ID，无法执行移帖");
+      } else {
+        const ok = await movePost(GUILD_ID, resolvedTargetFeedId, targetChannel, originalChannel, adminIdentityId);
+        cliResults.push(ok ? "移帖成功" : "移帖失败");
+        if (ok) {
+          await prisma.feed.update({
+            where: { feed_id: resolvedTargetFeedId },
+            data: { status: "moved" },
+          });
+        }
       }
     }
 
@@ -341,11 +364,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (isMute && resolvedTargetAuthorId && mute?.duration) {
-      // muteUser expects expiry Unix timestamp as string (current time + duration hours)
-      const expiryTimestamp = String(Math.floor(Date.now() / 1000) + Number(mute.duration) * 3600);
+    if (shouldMute && resolvedTargetAuthorId) {
+      const durationSeconds = parseDurationToSeconds(mute.duration);
+      const expiryTimestamp = String(Math.floor(Date.now() / 1000) + durationSeconds);
       const ok = await muteUser(GUILD_ID, resolvedTargetAuthorId, expiryTimestamp, adminIdentityId);
-      cliResults.push(ok ? `禁言${mute.duration}h成功` : "禁言失败");
+      cliResults.push(ok ? `禁言(${mute.duration})成功` : "禁言失败");
     }
 
     // ─── Send notification ────────────────────────────────────────────

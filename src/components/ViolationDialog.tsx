@@ -70,6 +70,7 @@ export function ViolationDialog({
   const [targetChannel, setTargetChannel] = useState<string>('');
   const [muteEnabled, setMuteEnabled] = useState(false);
   const [muteDuration, setMuteDuration] = useState<string>('24h');
+  const [customHours, setCustomHours] = useState<string>('');
   const [notifyEnabled, setNotifyEnabled] = useState(true);
   const [notifyType, setNotifyType] = useState<string>('reply');
   const [notifyContent, setNotifyContent] = useState('');
@@ -136,7 +137,7 @@ export function ViolationDialog({
         detail: detail || undefined,
         actionType,
         targetChannel: actionType === 'move' ? targetChannel : undefined,
-        mute: muteEnabled ? { duration: muteDuration } : undefined,
+        mute: muteEnabled ? { duration: muteDuration === 'custom' ? (customHours || '24') : muteDuration } : undefined,
         notification: notifyEnabled
           ? { type: notifyType, content: notifyContent }
           : undefined,
@@ -161,6 +162,7 @@ export function ViolationDialog({
     setTargetChannel('');
     setMuteEnabled(false);
     setMuteDuration('24h');
+    setCustomHours('');
     setNotifyEnabled(true);
     setNotifyType('reply');
     setNotifyContent('');
@@ -292,17 +294,51 @@ export function ViolationDialog({
             {muteEnabled && (
               <div className="space-y-2">
                 <Label>禁言时长</Label>
-                <Select value={muteDuration} onValueChange={(v) => setMuteDuration(v ?? '24h')}>
-                  <SelectTrigger className="w-full">
-                    <span className="text-sm">{{ '24h': '24小时', '7d': '7天', '30d': '30天', permanent: '永久' }[muteDuration] || '24小时'}</span>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="24h">24小时</SelectItem>
-                    <SelectItem value="7d">7天</SelectItem>
-                    <SelectItem value="30d">30天</SelectItem>
-                    <SelectItem value="permanent">永久</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { value: '1h', label: '1小时' },
+                    { value: '12h', label: '12小时' },
+                    { value: '24h', label: '1天' },
+                    { value: '7d', label: '7天' },
+                    { value: '30d', label: '30天' },
+                    { value: 'permanent', label: '永久' },
+                  ].map((opt) => (
+                    <Button
+                      key={opt.value}
+                      variant={muteDuration === opt.value ? 'default' : 'outline'}
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => setMuteDuration(opt.value)}
+                      type="button"
+                    >
+                      {opt.label}
+                    </Button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant={muteDuration === 'custom' ? 'default' : 'outline'}
+                    size="sm"
+                    className="text-xs shrink-0"
+                    onClick={() => setMuteDuration('custom')}
+                    type="button"
+                  >
+                    自定义
+                  </Button>
+                  {muteDuration === 'custom' && (
+                    <Input
+                      type="number"
+                      min={1}
+                      placeholder="输入小时数"
+                      value={customHours}
+                      onChange={(e) => setCustomHours(e.target.value)}
+                      className="w-28 h-8 text-xs"
+                    />
+                  )}
+                  {muteDuration === 'custom' && (
+                    <span className="text-xs text-gray-400">小时</span>
+                  )}
+                </div>
               </div>
             )}
 
