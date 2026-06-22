@@ -2,13 +2,15 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
 
-// Helper to resolve member by BigInt id or tinyid string
+// Helper to resolve member by tinyid string or BigInt id
 async function findMember(idOrTinyid: string) {
+  const byTinyid = await prisma.member.findUnique({ where: { tinyid: idOrTinyid } });
+  if (byTinyid) return byTinyid;
   try {
     const memberId = BigInt(idOrTinyid);
     return prisma.member.findUnique({ where: { id: memberId } });
   } catch {
-    return prisma.member.findUnique({ where: { tinyid: idOrTinyid } });
+    return null;
   }
 }
 
@@ -22,47 +24,49 @@ export async function GET(
 
     const { id } = await ctx.params;
 
-    // Look up member by BigInt id or tinyid
-    let member;
-    try {
-      const memberId = BigInt(id);
-      member = await prisma.member.findUnique({
-        where: { id: memberId },
-        include: {
-          tags: true,
-          violations: {
-            orderBy: { created_at: "desc" },
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  username: true,
-                  display_name: true,
-                },
+    // 先按 tinyid 查找（前端总是发送 tinyid），找不到再尝试 BigInt id
+    let member = await prisma.member.findUnique({
+      where: { tinyid: id },
+      include: {
+        tags: true,
+        violations: {
+          orderBy: { created_at: "desc" },
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                display_name: true,
               },
             },
           },
         },
-      });
-    } catch {
-      member = await prisma.member.findUnique({
-        where: { tinyid: id },
-        include: {
-          tags: true,
-          violations: {
-            orderBy: { created_at: "desc" },
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  username: true,
-                  display_name: true,
+      },
+    });
+    if (!member) {
+      try {
+        const memberId = BigInt(id);
+        member = await prisma.member.findUnique({
+          where: { id: memberId },
+          include: {
+            tags: true,
+            violations: {
+              orderBy: { created_at: "desc" },
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    username: true,
+                    display_name: true,
+                  },
                 },
               },
             },
           },
-        },
-      });
+        });
+      } catch {
+        // id 不是有效 BigInt，忽略
+      }
     }
 
     if (!member) {

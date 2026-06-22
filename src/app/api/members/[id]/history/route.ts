@@ -12,13 +12,15 @@ export async function GET(
 
     const { id } = await ctx.params;
 
-    // Look up member by tinyid (client sends tinyid) or BigInt id
-    let member;
-    try {
-      const memberId = BigInt(id);
-      member = await prisma.member.findUnique({ where: { id: memberId } });
-    } catch {
-      member = await prisma.member.findUnique({ where: { tinyid: id } });
+    // 先按 tinyid 查找（前端总是发送 tinyid），找不到再尝试 BigInt id
+    let member = await prisma.member.findUnique({ where: { tinyid: id } });
+    if (!member) {
+      try {
+        const memberId = BigInt(id);
+        member = await prisma.member.findUnique({ where: { id: memberId } });
+      } catch {
+        // id 不是有效 BigInt，忽略
+      }
     }
 
     if (!member) {
