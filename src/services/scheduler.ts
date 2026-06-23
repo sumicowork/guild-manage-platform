@@ -41,6 +41,8 @@ function writePersistedCron(update?: string, member?: string): void {
 
 // Priority: env var > persisted file > default
 const persisted = readPersistedCron();
+let updateTask: ScheduledTask | null = null;
+let memberTask: ScheduledTask | null = null;
 let currentUpdateCron = process.env.CRAWL_CRON || persisted.update || DEFAULT_CRON;
 let currentMemberCron = process.env.MEMBER_CRON || persisted.member || MEMBER_CRON;
 
