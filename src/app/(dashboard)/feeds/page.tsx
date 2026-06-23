@@ -220,13 +220,12 @@ export default function FeedsPage() {
         </Select>
         <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v ?? ''); setPage(1); }}>
           <SelectTrigger>
-            <span className="text-sm">{{ '': '全部状态', active: '正常', deleted: '已删除', moved: '已移帖' }[statusFilter] || '全部状态'}</span>
+            <span className="text-sm">{{ '': '全部状态', active: '正常', deleted: '已删除' }[statusFilter] || '全部状态'}</span>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="">全部状态</SelectItem>
             <SelectItem value="active">正常</SelectItem>
             <SelectItem value="deleted">已删除</SelectItem>
-            <SelectItem value="moved">已移帖</SelectItem>
           </SelectContent>
         </Select>
         <Select value={sortField} onValueChange={(v) => { setSortField(v ?? 'createdAt'); setPage(1); }}>

@@ -78,7 +78,7 @@ export async function GET(
     });
 
     // Compute aggregate stats
-    const [totalLikes, feedCount, commentCount, replyCount] = await Promise.all([
+    const [totalLikes, feedCount, commentCount, replyCount, violationCount] = await Promise.all([
       prisma.feed.aggregate({
         where: { author_id: member.tinyid },
         _sum: { prefer_count: true },
@@ -86,6 +86,7 @@ export async function GET(
       prisma.feed.count({ where: { author_id: member.tinyid } }),
       prisma.comment.count({ where: { author_id: member.tinyid } }),
       prisma.reply.count({ where: { author_id: member.tinyid } }),
+      prisma.violation.count({ where: { target_author_id: member.tinyid } }),
     ]);
 
     // Transform to match client's MemberHistory interface
@@ -109,7 +110,7 @@ export async function GET(
         commentCount,
         replyCount,
         likeCount: totalLikes._sum.prefer_count ?? 0,
-        violationCount: violations.length,
+        violationCount,
       },
       feeds: rawPosts.map((p: any) => ({
         id: String(p.id),

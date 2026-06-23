@@ -71,8 +71,7 @@ export default function MembersPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [tagFilter, setTagFilter] = useState('');
-  const [roleFilter, setRoleFilter] = useState('');
-  const [sortField, setSortField] = useState('createdAt');
+  const [sortField, setSortField] = useState('joinedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
@@ -92,7 +91,6 @@ export default function MembersPage() {
       if (search) params.set('search', search);
       if (statusFilter) params.set('status', statusFilter);
       if (tagFilter) params.set('tag', tagFilter);
-      if (roleFilter) params.set('role', roleFilter);
 
       const result = await api.get<MemberListResponse>(`/members?${params}`);
       setMembers(result.data);
@@ -102,7 +100,7 @@ export default function MembersPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, statusFilter, tagFilter, roleFilter, sortField, sortDir]);
+  }, [page, search, statusFilter, tagFilter, sortField, sortDir]);
 
   useEffect(() => {
     fetchMembers();
@@ -186,13 +184,6 @@ export default function MembersPage() {
       render: (m) => <span className="text-gray-700">{m.commentCount}</span>,
     },
     {
-      key: 'likeCount',
-      header: '获赞',
-      width: '70px',
-      align: 'center',
-      render: (m) => <span className="text-gray-700">{m.likeCount}</span>,
-    },
-    {
       key: 'tags',
       header: '标签',
       width: '160px',
@@ -242,17 +233,6 @@ export default function MembersPage() {
         </div>
       ),
     },
-    {
-      key: 'actions',
-      header: '操作',
-      width: '60px',
-      align: 'center',
-      render: () => (
-        <Button variant="ghost" size="icon-xs">
-          <MoreHorizontal className="size-3.5" />
-        </Button>
-      ),
-    },
   ];
 
   return (
@@ -298,24 +278,11 @@ export default function MembersPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={roleFilter} onValueChange={(v) => { setRoleFilter(v ?? ''); setPage(1); }}>
-          <SelectTrigger>
-            <span className="text-sm">{{ '': '全部角色', owner: '频道主', admin: '管理员', moderator: '版主', member: '成员' }[roleFilter] || '全部角色'}</span>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">全部角色</SelectItem>
-            <SelectItem value="owner">频道主</SelectItem>
-            <SelectItem value="admin">管理员</SelectItem>
-            <SelectItem value="moderator">版主</SelectItem>
-            <SelectItem value="member">成员</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={sortField} onValueChange={(v) => { setSortField(v ?? 'createdAt'); setPage(1); }}>
+        <Select value={sortField} onValueChange={(v) => { setSortField(v ?? 'joinedAt'); setPage(1); }}>
           <SelectTrigger className="w-[120px]">
-            <span className="text-sm">{{ createdAt: '按加入', joinedAt: '按加入时间', feedCount: '按发帖', commentCount: '按评论' }[sortField] || '排序'}</span>
+            <span className="text-sm">{{ joinedAt: '按加入时间', feedCount: '按发帖', commentCount: '按评论' }[sortField] || '排序'}</span>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="createdAt">按加入</SelectItem>
             <SelectItem value="joinedAt">按加入时间</SelectItem>
             <SelectItem value="feedCount">按发帖</SelectItem>
             <SelectItem value="commentCount">按评论</SelectItem>
