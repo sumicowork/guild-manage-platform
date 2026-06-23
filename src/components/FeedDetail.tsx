@@ -95,10 +95,12 @@ function ViolationButton({ onClick, className }: { onClick: () => void; classNam
 function ReplyItem({
   reply,
   depth,
+  feedId,
   onViolation,
 }: {
   reply: Reply;
   depth: number;
+  feedId: string;
   onViolation?: (replyId: string, author: string, authorId: string, feedId: string) => void;
 }) {
   return (
@@ -122,7 +124,7 @@ function ReplyItem({
           )}
           <span className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
             {onViolation && (
-              <ViolationButton onClick={() => onViolation(reply.replyId, reply.author, reply.authorId, '')} />
+              <ViolationButton onClick={() => onViolation(reply.replyId, reply.author, reply.authorId, feedId)} />
             )}
           </span>
         </div>
@@ -172,7 +174,8 @@ function CommentItem({
               key={reply.id}
               reply={reply}
               depth={idx > 0 ? 1 : 0}
-              onViolation={onViolationReply ? (replyId, author, authorId) => onViolationReply(replyId, author, authorId, comment.feedId) : undefined}
+              feedId={comment.feedId}
+              onViolation={onViolationReply}
             />
           ))}
         </div>

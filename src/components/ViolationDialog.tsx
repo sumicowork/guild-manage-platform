@@ -44,7 +44,7 @@ interface Channel {
 interface ViolationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  targetType: 'feed' | 'comment';
+  targetType: 'feed' | 'comment' | 'reply';
   targetId: string;
   targetAuthor?: string;
   targetAuthorId?: string;
@@ -65,7 +65,7 @@ export function ViolationDialog({
   const [selectedReasonId, setSelectedReasonId] = useState<string>('');
   const [detail, setDetail] = useState('');
   const [actionType, setActionType] = useState<string>(
-    targetType === 'feed' ? 'move' : 'delete_comment'
+    targetType === 'feed' ? 'move' : targetType === 'reply' ? 'delete_reply' : 'delete_comment'
   );
   const [targetChannel, setTargetChannel] = useState<string>('');
   const [muteEnabled, setMuteEnabled] = useState(false);
@@ -158,7 +158,7 @@ export function ViolationDialog({
   const resetForm = () => {
     setSelectedReasonId('');
     setDetail('');
-    setActionType(targetType === 'feed' ? 'move' : 'delete_comment');
+    setActionType(targetType === 'feed' ? 'move' : targetType === 'reply' ? 'delete_reply' : 'delete_comment');
     setTargetChannel('');
     setMuteEnabled(false);
     setMuteDuration('24h');
@@ -174,7 +174,11 @@ export function ViolationDialog({
           { value: 'move', label: '移帖' },
           { value: 'delete', label: '删帖' },
         ]
+      : targetType === 'reply'
+      ? [{ value: 'delete_reply', label: '删回复' }]
       : [{ value: 'delete_comment', label: '删评论' }];
+
+  const targetLabel = targetType === 'feed' ? '帖子' : '评论';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -182,7 +186,7 @@ export function ViolationDialog({
         <DialogHeader>
           <DialogTitle>标记违规</DialogTitle>
           <DialogDescription>
-            {targetType === 'feed' ? '帖子' : '评论'} {targetId}
+            {targetLabel} {targetId}
             {targetAuthor && ` · ${targetAuthor}`}
           </DialogDescription>
         </DialogHeader>
