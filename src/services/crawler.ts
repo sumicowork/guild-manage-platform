@@ -598,9 +598,12 @@ export async function runUpdateCrawl(
           feed.comment_count !== null &&
           existing.comment_count !== Number(feed.comment_count)
         ) {
-          // Comment count changed — only compare when CLI actually returned the field
-          // Number() guards against string vs int type mismatch from CLI output
-          await upsertFeed(feed);
+          // Comment count changed — use direct update to guarantee persistence
+          // (upsertFeed via @prisma/adapter-pg may not always persist Int fields)
+          await prisma.feed.update({
+            where: { feed_id: feed.feed_id },
+            data: { comment_count: Number(feed.comment_count) },
+          });
           stats.updatedFeeds++;
           changedFeedIds.push(feed.feed_id);
           pageHasChanges = true;

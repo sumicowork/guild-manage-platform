@@ -5,6 +5,8 @@ import {
   runUpdateCrawl,
   runMemberCrawl,
 } from "@/services/crawler";
+import fs from "fs";
+import path from "path";
 
 // ─── Configuration ────────────────────────────────────────────────────
 
@@ -14,12 +16,33 @@ const DEFAULT_CRON = "0 */6 * * *";
 /** Member crawl cron: daily at 3 AM */
 const MEMBER_CRON = "0 3 * * *";
 
+/** File to persist cron settings across restarts */
+const CONFIG_FILE = path.join(process.cwd(), ".crawl_config.json");
+
+function readPersistedCron(): { update?: string; member?: string } {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
+    }
+  } catch { /* ignore */ }
+  return {};
+}
+
+function writePersistedCron(update?: string, member?: string): void {
+  try {
+    const existing = readPersistedCron();
+    if (update !== undefined) existing.update = update;
+    if (member !== undefined) existing.member = member;
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(existing), "utf-8");
+  } catch { /* ignore */ }
+}
+
 // ─── State ────────────────────────────────────────────────────────────
 
-let updateTask: ScheduledTask | null = null;
-let memberTask: ScheduledTask | null = null;
-let currentUpdateCron = process.env.CRAWL_CRON || DEFAULT_CRON;
-let currentMemberCron = process.env.MEMBER_CRON || MEMBER_CRON;
+// Priority: env var > persisted file > default
+const persisted = readPersistedCron();
+let currentUpdateCron = process.env.CRAWL_CRON || persisted.update || DEFAULT_CRON;
+let currentMemberCron = process.env.MEMBER_CRON || persisted.member || MEMBER_CRON;
 
 /** Tracks whether a crawl of each type is currently running to prevent overlap */
 const runningTasks: Record<string, boolean> = {
@@ -172,6 +195,7 @@ export function updateCrawlSchedule(cronExpr: string): void {
   }
 
   currentUpdateCron = cronExpr;
+  writePersistedCron(cronExpr, undefined);
   console.log(`[Scheduler] Updating crawl schedule to: ${cronExpr}`);
 
   // Restart the update task
@@ -201,6 +225,7 @@ export function updateMemberSchedule(cronExpr: string): void {
   }
 
   currentMemberCron = cronExpr;
+  writePersistedCron(undefined, cronExpr);
   console.log(`[Scheduler] Updating member schedule to: ${cronExpr}`);
 
   if (memberTask) {
