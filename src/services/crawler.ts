@@ -114,8 +114,8 @@ async function upsertFeed(feed: any, detail?: any): Promise<void> {
       content_snippet: feed.content_snippet ?? undefined,
       share_url: detail?.share_url ?? undefined,
       images: feed.images ?? undefined,
-      prefer_count: feed.prefer_count ?? undefined,
-      comment_count: feed.comment_count ?? undefined,
+      prefer_count: feed.prefer_count != null ? Number(feed.prefer_count) : undefined,
+      comment_count: feed.comment_count != null ? Number(feed.comment_count) : undefined,
       feed_type: detail?.feed_type ?? feed.feed_type ?? undefined,
       create_time: createTime ?? undefined,
       create_time_raw: createTimeRaw ?? undefined,
@@ -551,12 +551,15 @@ export async function runUpdateCrawl(
     log(taskId, "Phase 1: Scanning feeds for changes...");
     let cursor = "";
     let consecutiveCleanPages = 0;
+    let pageCount = 0;
+    const MAX_SCAN_PAGES = 6; // 增量最多扫 6 页 (3000 条)，对齐 Python 原版
     const changedFeedIds: string[] = [];
     const allSeenFeedIds = new Set<string>();
     const feedChannelMap: Record<string, string> = {}; // feed_id → channel_id
     let oldestSeenTime: number | null = null; // 扫描范围的最老帖子时间戳
 
-    while (consecutiveCleanPages < 2) {
+    while (consecutiveCleanPages < 2 && pageCount < MAX_SCAN_PAGES) {
+      pageCount++;
       const page = await getGuildFeeds(gid, cursor, 500, 2, adminIdentityId);
 
       let pageHasChanges = false;
@@ -585,18 +588,26 @@ export async function runUpdateCrawl(
           stats.newFeeds++;
           changedFeedIds.push(feed.feed_id);
           pageHasChanges = true;
-        } else if (existing.comment_count !== (feed.comment_count ?? 0)) {
-          // Comment count changed — needs re-crawl of comments
-          await upsertFeed(feed);
-          stats.updatedFeeds++;
-          changedFeedIds.push(feed.feed_id);
-          pageHasChanges = true;
         } else if (existing.status === "deleted") {
           // Was marked deleted but now visible again
           await upsertFeed(feed);
           stats.updatedFeeds++;
           pageHasChanges = true;
+        } else if (
+          feed.comment_count !== undefined &&
+          feed.comment_count !== null &&
+          existing.comment_count !== Number(feed.comment_count)
+        ) {
+          // Comment count changed — only compare when CLI actually returned the field
+          // Number() guards against string vs int type mismatch from CLI output
+          await upsertFeed(feed);
+          stats.updatedFeeds++;
+          changedFeedIds.push(feed.feed_id);
+          pageHasChanges = true;
         }
+        // If feed.comment_count is undefined/null, skip the comparison entirely.
+        // Otherwise missing fields would cause a perpetual false-positive loop:
+        //   DB=5 ≠ (undefined ?? 0)=0 → changed → upsert skips field → DB stays 5 → loop
       }
 
       if (pageHasChanges) {
@@ -608,11 +619,15 @@ export async function runUpdateCrawl(
 
       log(
         taskId,
-        `Feed scan: ${stats.newFeeds} new, ${stats.updatedFeeds} updated, clean pages: ${consecutiveCleanPages}`
+        `Feed scan (page ${pageCount}): ${stats.newFeeds} new, ${stats.updatedFeeds} updated, clean pages: ${consecutiveCleanPages}`
       );
 
       if (!page.nextCursor) break;
       cursor = page.nextCursor;
+    }
+
+    if (pageCount >= MAX_SCAN_PAGES) {
+      log(taskId, `Scan hit max page limit (${MAX_SCAN_PAGES} pages), stopping early`);
     }
 
     log(
