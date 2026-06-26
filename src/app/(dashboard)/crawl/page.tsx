@@ -166,7 +166,6 @@ export default function CrawlPage() {
     // 加载管理员身份列表
     api.get<AdminIdentity[]>('/admin-identities').then((data) => {
       setIdentities(data);
-      if (data.length > 0) setAdminIdentityId(String(data[0].id));
     }).catch(() => {});
   }, [fetchTasks, fetchSchedule]);
 
@@ -280,10 +279,11 @@ export default function CrawlPage() {
         <h2 className="text-lg font-semibold text-gray-900">爬取管理</h2>
         <div className="flex items-center gap-2">
           <Select value={adminIdentityId} onValueChange={(v) => setAdminIdentityId(v ?? '')}>
-            <SelectTrigger className="w-[140px]">
-              <span className="text-sm truncate">{adminIdentityId ? (identities.find(i => String(i.id) === adminIdentityId)?.name || '操作身份') : '操作身份'}</span>
+            <SelectTrigger className="w-[180px]">
+              <span className="text-sm truncate">{adminIdentityId ? (identities.find(i => String(i.id) === adminIdentityId)?.name || '操作身份') : '自动轮转'}</span>
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="">自动轮转（推荐）</SelectItem>
               {identities.map((id) => (
                 <SelectItem key={id.id} value={String(id.id)}>
                   {id.name}
