@@ -351,7 +351,7 @@ export async function runFullCrawl(
     const feedChannelMap: Record<string, string> = {}; // feed_id → channel_id
 
     while (true) {
-      const page = await getGuildFeeds(gid, cursor, 20, 2, adminIdentityId);
+      const page = await getGuildFeeds(gid, cursor, 500, 2, adminIdentityId);
       if (!page.feeds || page.feeds.length === 0) break;
 
       for (const feed of page.feeds) {
