@@ -109,9 +109,9 @@ export default function ViolationsPage() {
       if (actionFilter) params.set('actionType', actionFilter);
       if (operatorFilter) params.set('operator', operatorFilter);
 
-      const token = api.getToken();
+      // Auth via httpOnly cookie — credentials: 'include' required for fetch
       const res = await fetch(`/api/violations/export?${params}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
       });
       if (!res.ok) throw new Error('导出失败');
       const blob = await res.blob();

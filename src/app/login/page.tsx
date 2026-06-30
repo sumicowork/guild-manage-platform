@@ -24,12 +24,12 @@ export default function LoginPage() {
     }
     setLoading(true);
     try {
-      const data = await api.post<{ token: string; user: { username: string } }>('/auth/login', {
+      const data = await api.post<{ user: { username: string } }>('/auth/login', {
         username: username.trim(),
         password,
       });
-      api.setToken(data.token);
-      toast.success('登录成功');
+      // Token is set via httpOnly cookie by the server — nothing to store client-side
+      toast.success(`欢迎，${data.user.username}`);
       router.push('/');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '登录失败');

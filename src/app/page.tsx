@@ -94,16 +94,28 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const hasToken = useCallback(() => {
-    return api.getToken() !== null;
+  const hasToken = useCallback(async () => {
+    // Post-cookie-auth: probe /auth/session; if it returns ok we're logged in
+    try {
+      await api.get('/auth/session');
+      return true;
+    } catch {
+      return false;
+    }
   }, []);
 
   useEffect(() => {
-    if (!hasToken()) {
-      router.replace('/login');
-      return;
-    }
-    fetchDashboard();
+    let cancelled = false;
+    (async () => {
+      const ok = await hasToken();
+      if (cancelled) return;
+      if (!ok) {
+        router.replace('/login');
+        return;
+      }
+      fetchDashboard();
+    })();
+    return () => { cancelled = true; };
   }, [hasToken, router]);
 
   const fetchDashboard = async () => {

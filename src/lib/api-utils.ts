@@ -1,13 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken, TokenPayload } from "@/lib/auth";
+import { verifyToken, TokenPayload, ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME } from "@/lib/auth";
 
+/**
+ * Reads the access token from the gp_access httpOnly cookie.
+ * (Previously read from Authorization: Bearer header — now cookie-based.)
+ */
 export async function getAuthUser(
   req: NextRequest
 ): Promise<TokenPayload | null> {
-  const authHeader = req.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) return null;
-  const token = authHeader.slice(7);
+  const token = req.cookies.get(ACCESS_COOKIE_NAME)?.value;
+  if (!token) return null;
   return verifyToken(token);
+}
+
+/**
+ * Reads the raw refresh token from the gp_refresh cookie, if present.
+ */
+export function getRefreshTokenFromReq(req: NextRequest): string | null {
+  return req.cookies.get(REFRESH_COOKIE_NAME)?.value ?? null;
 }
 
 export function unauthorized() {

@@ -38,8 +38,12 @@ function DashboardShellInner({ children }: DashboardShellProps) {
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const handleLogout = () => {
-    api.clearToken();
+  const handleLogout = async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      // Logout endpoint failure is non-fatal — cookies cleared server-side best-effort
+    }
     router.push('/login');
   };
 
