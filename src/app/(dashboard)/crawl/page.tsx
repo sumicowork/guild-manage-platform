@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { RefreshCw, Download, Users, Loader2, Clock, Save } from 'lucide-react';
+import { RefreshCw, Download, Users, Loader2, Clock, Save, Square } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -54,6 +54,8 @@ const statusColors: Record<string, string> = {
   completed: 'bg-green-50 text-green-600',
   failed: 'bg-red-50 text-red-600',
   pending: 'bg-gray-100 text-gray-600',
+  cancelled: 'bg-orange-50 text-orange-600',
+  interrupted: 'bg-orange-50 text-orange-600',
 };
 
 const statusLabels: Record<string, string> = {
@@ -61,6 +63,8 @@ const statusLabels: Record<string, string> = {
   completed: '已完成',
   failed: '失败',
   pending: '等待中',
+  cancelled: '已取消',
+  interrupted: '已中断',
 };
 
 const triggerLabels: Record<string, string> = {
@@ -127,6 +131,7 @@ export default function CrawlPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<number | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [identities, setIdentities] = useState<AdminIdentity[]>([]);
   const [adminIdentityId, setAdminIdentityId] = useState<string>('');
@@ -195,6 +200,23 @@ export default function CrawlPage() {
       toast.error(err instanceof Error ? err.message : '触发失败');
     } finally {
       setTriggering(null);
+    }
+  };
+
+  const cancelTask = async (taskId: number) => {
+    setCancellingId(taskId);
+    try {
+      const result = await api.post<{ cancelled: boolean; message?: string; reason?: string }>('/crawl/cancel', { taskId: String(taskId) });
+      if (result.cancelled) {
+        toast.success(result.message || '已发出取消信号');
+      } else {
+        toast.info(result.message || `任务无法取消：${result.reason || '未知原因'}`);
+      }
+      fetchTasks();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '取消失败');
+    } finally {
+      setCancellingId(null);
     }
   };
 
@@ -267,6 +289,26 @@ export default function CrawlPage() {
           <span className="block max-w-[200px] truncate text-xs text-red-500" title={t.errorMessage}>
             {t.errorMessage}
           </span>
+        ) : (
+          <span className="text-xs text-gray-400">-</span>
+        ),
+    },
+    {
+      key: 'actions',
+      header: '操作',
+      width: '90px',
+      render: (t) =>
+        t.status === 'running' || t.status === 'pending' ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => cancelTask(t.id)}
+            disabled={cancellingId === t.id}
+            className="text-orange-600 hover:text-orange-700 hover:bg-orange-50 border-orange-200"
+          >
+            {cancellingId === t.id ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3.5" />}
+            停止
+          </Button>
         ) : (
           <span className="text-xs text-gray-400">-</span>
         ),

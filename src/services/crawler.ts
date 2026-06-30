@@ -11,6 +11,29 @@ import path from "path";
 
 const GUILD_ID = process.env.GUILD_ID || "";
 
+// ─── Cancellation support ────────────────────────────────────────────
+
+/**
+ * Thrown when a crawl is cancelled via AbortSignal.
+ * Caller (scheduler) catches this and marks the task as 'cancelled'.
+ */
+export class CrawlCancelledError extends Error {
+  constructor(taskId: bigint) {
+    super(`Crawl task #${taskId} was cancelled`);
+    this.name = "CrawlCancelledError";
+  }
+}
+
+/**
+ * Check abort signal at cooperative cancellation points (loop tops).
+ * Throws CrawlCancelledError if aborted, so the crawl unwinds quickly.
+ */
+function checkAbort(signal: AbortSignal | undefined, taskId: bigint): void {
+  if (signal?.aborted) {
+    throw new CrawlCancelledError(taskId);
+  }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────
 
 /** Parse a "YYYY-MM-DD HH:mm:ss", Unix number, or numeric string timestamp into a Date */
@@ -324,7 +347,8 @@ async function upsertMember(rawMember: any): Promise<void> {
 export async function runFullCrawl(
   guildId: string,
   taskId: bigint,
-  adminIdentityId?: number
+  adminIdentityId?: number,
+  signal?: AbortSignal
 ): Promise<void> {
   const gid = guildId || GUILD_ID;
   log(taskId, `Starting full crawl for guild ${gid}`);
@@ -351,6 +375,7 @@ export async function runFullCrawl(
     const feedChannelMap: Record<string, string> = {}; // feed_id → channel_id
 
     while (true) {
+      checkAbort(signal, taskId);
       const page = await getGuildFeeds(gid, cursor, 500, 2, adminIdentityId);
       if (!page.feeds || page.feeds.length === 0) break;
 
@@ -383,6 +408,7 @@ export async function runFullCrawl(
     // ── Phase 2: Comments ──
     log(taskId, "Phase 2: Fetching comments...");
     for (let i = 0; i < allFeedIds.length; i++) {
+      checkAbort(signal, taskId);
       const feedId = allFeedIds[i];
       try {
         let commentCursor = "";
@@ -528,7 +554,8 @@ export async function runFullCrawl(
 export async function runUpdateCrawl(
   guildId: string,
   taskId: bigint,
-  adminIdentityId?: number
+  adminIdentityId?: number,
+  signal?: AbortSignal
 ): Promise<void> {
   const gid = guildId || GUILD_ID;
   log(taskId, `Starting update crawl for guild ${gid}`);
@@ -559,6 +586,7 @@ export async function runUpdateCrawl(
     let oldestSeenTime: number | null = null; // 扫描范围的最老帖子时间戳
 
     while (consecutiveCleanPages < 2 && pageCount < MAX_SCAN_PAGES) {
+      checkAbort(signal, taskId);
       pageCount++;
       const page = await getGuildFeeds(gid, cursor, 500, 2, adminIdentityId);
 
@@ -653,9 +681,11 @@ export async function runUpdateCrawl(
 
       const workers = chunks.map(async (chunk, workerIdx) => {
         for (const feedId of chunk) {
+          checkAbort(signal, taskId);
           try {
             let commentCursor = "";
             while (true) {
+              checkAbort(signal, taskId);
               const commentPage = await getFeedComments(feedId, gid, commentCursor, adminIdentityId);
               if (!commentPage.comments || commentPage.comments.length === 0) break;
 
@@ -742,7 +772,8 @@ export async function runUpdateCrawl(
 export async function runMemberCrawl(
   guildId: string,
   taskId: bigint,
-  adminIdentityId?: number
+  adminIdentityId?: number,
+  signal?: AbortSignal
 ): Promise<void> {
   const gid = guildId || GUILD_ID;
   log(taskId, `Starting member crawl for guild ${gid}`);
@@ -760,6 +791,7 @@ export async function runMemberCrawl(
     const seenTinyIds = new Set<string>();
 
     while (true) {
+      checkAbort(signal, taskId);
       const page = await getGuildMembers(gid, cursor, 100, adminIdentityId);
       if (!page.members || page.members.length === 0) break;
 

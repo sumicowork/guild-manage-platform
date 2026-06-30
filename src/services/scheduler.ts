@@ -4,6 +4,7 @@ import {
   runFullCrawl,
   runUpdateCrawl,
   runMemberCrawl,
+  CrawlCancelledError,
 } from "@/services/crawler";
 import fs from "fs";
 import path from "path";
@@ -56,6 +57,10 @@ const runningTasks: Record<string, boolean> = {
 /** Global lock: only one crawl of any type runs at a time to avoid CLI rate-limit (153) */
 let _anyCrawlRunning = false;
 
+/** Tracks AbortControllers for currently running tasks, keyed by task ID (as string).
+ *  Used by cancelCrawl() to signal cancellation to in-flight crawls. */
+const _abortControllers: Map<string, AbortController> = new Map();
+
 // ─── Core trigger ─────────────────────────────────────────────────────
 
 /**
@@ -107,24 +112,45 @@ export async function triggerCrawl(
   _anyCrawlRunning = true;
   runningTasks[type] = true;
 
+  const controller = new AbortController();
+  const taskIdStr = String(taskId);
+  _abortControllers.set(taskIdStr, controller);
+
   const run = async () => {
     try {
       switch (type) {
         case "full":
-          await runFullCrawl(guildId, taskId, adminIdentityId);
+          await runFullCrawl(guildId, taskId, adminIdentityId, controller.signal);
           break;
         case "update":
-          await runUpdateCrawl(guildId, taskId, adminIdentityId);
+          await runUpdateCrawl(guildId, taskId, adminIdentityId, controller.signal);
           break;
         case "members":
-          await runMemberCrawl(guildId, taskId, adminIdentityId);
+          await runMemberCrawl(guildId, taskId, adminIdentityId, controller.signal);
           break;
       }
     } catch (err) {
-      console.error(`[Scheduler] ${type} crawl task #${taskId} failed:`, err);
+      if (err instanceof CrawlCancelledError) {
+        console.log(`[Scheduler] ${type} crawl task #${taskId} was cancelled by user`);
+        try {
+          await prisma.crawlTask.update({
+            where: { id: taskId },
+            data: {
+              status: "cancelled",
+              finished_at: new Date(),
+              error_log: "Cancelled by user via /api/crawl/cancel",
+            },
+          });
+        } catch (updateErr) {
+          console.error(`[Scheduler] Failed to mark task #${taskId} as cancelled:`, updateErr);
+        }
+      } else {
+        console.error(`[Scheduler] ${type} crawl task #${taskId} failed:`, err);
+      }
     } finally {
       runningTasks[type] = false;
       _anyCrawlRunning = false;
+      _abortControllers.delete(taskIdStr);
     }
   };
 
@@ -133,9 +159,28 @@ export async function triggerCrawl(
     console.error(`[Scheduler] Unhandled error in ${type} crawl:`, err);
     runningTasks[type] = false;
     _anyCrawlRunning = false;
+    _abortControllers.delete(taskIdStr);
   });
 
   return taskId;
+}
+
+// ─── Cancellation ────────────────────────────────────────────────────
+
+/**
+ * Cancels a running crawl task by ID.
+ * Aborts the in-flight crawl via AbortSignal; the crawler cooperatively
+ * unwinds at the next loop checkpoint and the task is marked 'cancelled'.
+ *
+ * @param taskId  The task ID to cancel
+ * @returns true if a controller was found and aborted, false if no running task matches
+ */
+export function cancelCrawl(taskId: bigint): boolean {
+  const taskIdStr = String(taskId);
+  const controller = _abortControllers.get(taskIdStr);
+  if (!controller) return false;
+  controller.abort();
+  return true;
 }
 
 // ─── Scheduler lifecycle ──────────────────────────────────────────────
