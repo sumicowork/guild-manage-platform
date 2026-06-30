@@ -243,3 +243,22 @@ model CrawlTask {
   @@index([task_type])
   @@map("crawl_tasks")
 }
+
+// ─── 操作日志（审计追踪） ───
+model OperationLog {
+  id            BigInt   @id @default(autoincrement())
+  action        String   // e.g. "violation.delete"
+  target_type   String   // e.g. "violation"
+  target_id     String   // 被操作对象的 ID
+  snapshot      Json?    // 操作前对象的快照（用于审计回溯）
+  operator_id   BigInt   // 平台用户 ID
+  operator_name String?  // 操作者用户名（冗余，便于查询）
+  detail        String?  // 附加说明
+  created_at    DateTime @default(now())
+
+  @@index([action])
+  @@index([target_type, target_id])
+  @@index([operator_id])
+  @@index([created_at])
+  @@map("operation_logs")
+}
