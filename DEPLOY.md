@@ -81,7 +81,7 @@ guild-platform/
 │   ├── lib/
 │   └── services/
 ├── scripts/
-│   └── migrate-data.ts
+│   └── (运维脚本)
 ├── public/                       # 静态资源（如有）
 ├── .env                          # ⚠️ 需修改后上传
 ├── .env.local                    # ⚠️ 需修改后上传
@@ -173,21 +173,7 @@ npx prisma db push          # 创建数据库表结构
 npm run build               # 构建 Next.js 应用
 ```
 
-#### 4.4 导入历史数据
-
-```bash
-# 先把 JSON 原始数据文件上传到 /opt/output/
-# 然后执行迁移
-npx tsx scripts/migrate-data.ts
-```
-
-这一步会：
-- 导入 34000+ 帖子、96000+ 评论/回复
-- 导入成员数据
-- 创建 5 个内置违规原因分类
-- 创建默认管理员账号（admin / admin123）
-
-#### 4.5 用 PM2 启动应用
+#### 4.4 用 PM2 启动应用
 
 ```bash
 pm2 start npm --name "guild-platform" -- start
@@ -197,7 +183,7 @@ pm2 status                  # 确认运行状态
 
 应用默认运行在 `http://localhost:3000`。
 
-#### 4.6 配置 Nginx 反向代理
+#### 4.5 配置 Nginx 反向代理
 
 ```bash
 sudo nano /etc/nginx/sites-available/guild-platform
@@ -238,7 +224,7 @@ sudo nginx -t               # 检查配置语法
 sudo systemctl reload nginx
 ```
 
-#### 4.7 配置 SSL（HTTPS）
+#### 4.6 配置 SSL（HTTPS）
 
 **方式一：Let's Encrypt 免费证书（推荐）**
 
@@ -281,7 +267,7 @@ server {
 }
 ```
 
-#### 4.8 配置防火墙
+#### 4.7 配置防火墙
 
 ```bash
 # Ubuntu UFW

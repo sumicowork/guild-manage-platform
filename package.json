@@ -8,7 +8,6 @@
     "start": "next start",
     "start:container": "node start.js",
     "lint": "eslint",
-    "migrate": "npx tsx scripts/migrate-data.ts",
     "db:push": "npx prisma db push",
     "db:generate": "npx prisma generate"
   },

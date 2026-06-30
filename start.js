@@ -82,7 +82,7 @@ async function main() {
   log("  数据库: " + dbUrlShort);
 
   // ─── 1. 确认数据库结构 ───
-  log("[1/5] 更新数据库结构...");
+  log("[1/4] 更新数据库结构...");
   try {
     run("npx prisma generate", { stdio: "pipe" });
     log("  ✓ Prisma Client 已生成");
@@ -98,7 +98,7 @@ async function main() {
   }
 
   // ─── 2. 验证数据库连接 ───
-  log("[2/5] 验证数据库连接...");
+  log("[2/4] 验证数据库连接...");
   try {
     await verifyDb();
   } catch (e) {
@@ -112,55 +112,19 @@ async function main() {
     process.exit(1);
   }
 
-  // ─── 3. 检查数据并导入 ───
-  log("[3/5] 检查数据状态...");
+  // ─── 3. 检查数据状态 ───
+  log("[3/4] 检查数据状态...");
   const count = await checkDbHasData();
-
-  // 只有明确查到有数据才跳过导入
   if (count !== null && count > 0) {
-    log(`  → 数据库已有 ${count} 条帖子记录，跳过导入`);
+    log(`  → 数据库已有 ${count} 条帖子记录`);
+  } else if (count === null) {
+    log("  ⚠ 无法查询数据库，继续启动...");
   } else {
-    if (count === null) {
-      log("  ⚠ 无法查询数据库，尝试直接导入...");
-    } else {
-      log("  → 数据库为空");
-    }
-    const jsonDir = process.env.JSON_DATA_DIR || path.join(ROOT, "output");
-    const mainJson = path.join(jsonDir, "82203161765285899_20260528_151950.json");
-
-    if (fs.existsSync(mainJson)) {
-      log("  → 从 JSON 导入历史数据...");
-      // 确保 output/ 目录存在并包含所有 JSON
-      const outDir = path.join(ROOT, "output");
-      if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-      const jsonFiles = fs.readdirSync(jsonDir).filter((f) => f.endsWith(".json"));
-      for (const f of jsonFiles) {
-        const src = path.join(jsonDir, f);
-        if (fs.statSync(src).isFile()) {
-          fs.copyFileSync(src, path.join(outDir, f));
-        }
-      }
-      log(`  → 复制了 ${jsonFiles.length} 个 JSON 文件`);
-
-      try {
-        run("npx tsx scripts/migrate-data.ts", {
-          stdio: "inherit",
-          timeout: 600000, // 10min
-          env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL },
-        });
-        log("  ✓ 历史数据导入完成");
-      } catch (e) {
-        log("  ⚠ 数据导入失败: " + e.message);
-        log("  → 跳过，可后续手动执行 npm run migrate");
-      }
-    } else {
-      log("  → 未找到 JSON 文件（期待路径: " + mainJson + "）");
-      log("  → 跳过导入");
-    }
+    log("  → 数据库为空（请通过爬虫或手动方式录入数据）");
   }
 
   // ─── 4. 构建（始终构建，确保使用最新代码） ───
-  log("[4/5] 构建生产版本...");
+  log("[4/4] 构建生产版本...");
   // 清除旧构建，避免残留旧代码
   const buildDir = path.join(ROOT, ".next");
   if (fs.existsSync(buildDir)) {
@@ -180,7 +144,7 @@ async function main() {
 
   // ─── 5. 启动 Next.js 服务（前台进程） ───
   log("================================================");
-  log("[5/5] 启动服务：端口 " + (process.env.PORT || "3000"));
+  log("启动服务：端口 " + (process.env.PORT || "3000"));
   log("================================================");
 
   const next = spawn("node", ["./node_modules/.bin/next", "start"], {
