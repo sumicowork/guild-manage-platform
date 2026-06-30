@@ -53,6 +53,9 @@ const runningTasks: Record<string, boolean> = {
   members: false,
 };
 
+/** Global lock: only one crawl of any type runs at a time to avoid CLI rate-limit (153) */
+let _anyCrawlRunning = false;
+
 // ─── Core trigger ─────────────────────────────────────────────────────
 
 /**
@@ -77,6 +80,13 @@ export async function triggerCrawl(
     );
   }
 
+  // Global lock: prevent any concurrent crawl to avoid CLI 153 rate-limit
+  if (_anyCrawlRunning) {
+    throw new Error(
+      `Another crawl is currently running. Please wait for it to finish before starting a ${type} crawl.`
+    );
+  }
+
   const guildId = process.env.GUILD_ID || "";
 
   // Create the task record
@@ -93,7 +103,8 @@ export async function triggerCrawl(
   const taskId = task.id;
   console.log(`[Scheduler] Created ${type} crawl task #${taskId}`);
 
-  // Run in background (fire-and-forget)
+  // Don't await — let it run in the background
+  _anyCrawlRunning = true;
   runningTasks[type] = true;
 
   const run = async () => {
@@ -113,6 +124,7 @@ export async function triggerCrawl(
       console.error(`[Scheduler] ${type} crawl task #${taskId} failed:`, err);
     } finally {
       runningTasks[type] = false;
+      _anyCrawlRunning = false;
     }
   };
 
@@ -120,6 +132,7 @@ export async function triggerCrawl(
   run().catch((err) => {
     console.error(`[Scheduler] Unhandled error in ${type} crawl:`, err);
     runningTasks[type] = false;
+    _anyCrawlRunning = false;
   });
 
   return taskId;
@@ -131,10 +144,23 @@ export async function triggerCrawl(
  * Initializes the cron-based scheduler.
  * Called once at application startup (e.g., in a layout or server component).
  */
-export function initScheduler(): void {
+export async function initScheduler(): Promise<void> {
   console.log(`[Scheduler] Initializing with cron: ${currentUpdateCron} (update), ${currentMemberCron} (members)`);
 
-  // Clean up any existing tasks
+  // Clean up zombie tasks left in "running" state from previous server lifetime
+  try {
+    const result = await prisma.crawlTask.updateMany({
+      where: { status: "running" },
+      data: { status: "interrupted", finished_at: new Date(), error_log: "Server restarted while task was running" },
+    });
+    if (result.count > 0) {
+      console.log(`[Scheduler] Cleaned up ${result.count} zombie task(s) left in 'running' state`);
+    }
+  } catch (err) {
+    console.error("[Scheduler] Failed to clean up zombie tasks:", err);
+  }
+
+  // Clean up any existing scheduled tasks
   destroyScheduler();
 
   // Schedule update crawl

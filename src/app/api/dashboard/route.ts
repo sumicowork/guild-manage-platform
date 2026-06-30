@@ -52,11 +52,12 @@ export async function GET(req: NextRequest) {
         orderBy: { created_at: "desc" },
       }),
 
-      // Last 7 days daily violation counts
+      // Last 7 days daily violation counts (capped for safety)
       prisma.violation.findMany({
         where: { created_at: { gte: sevenDaysAgo } },
         select: { created_at: true },
         orderBy: { created_at: "asc" },
+        take: 5000,
       }),
 
       // Violations grouped by reason

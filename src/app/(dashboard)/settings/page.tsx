@@ -608,7 +608,7 @@ export default function SettingsPage() {
                 <Button
                   size="sm"
                   variant={cliStatus.loggedIn ? 'outline' : 'default'}
-                  onClick={handleStartCliLogin}
+                  onClick={() => handleStartCliLogin()}
                 >
                   {cliStatus.loggedIn ? '重新登录' : '扫码登录'}
                 </Button>

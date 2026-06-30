@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, success, error, serializeBigInt } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, forbidden, success, error, serializeBigInt } from "@/lib/api-utils";
 import { encrypt } from "@/lib/crypto";
+import { invalidateIdentityPool } from "@/lib/cli/executor";
 
 export async function PUT(
   req: NextRequest,
@@ -10,9 +11,15 @@ export async function PUT(
   try {
     const auth = await getAuthUser(req);
     if (!auth) return unauthorized();
+    if (auth.role !== "admin") return forbidden();
 
     const { id } = await ctx.params;
-    const identityId = BigInt(id);
+    let identityId: bigint;
+    try {
+      identityId = BigInt(id);
+    } catch {
+      return error("无效的身份ID", 400);
+    }
 
     const body = await req.json();
     const { nickname, token, status } = body;
@@ -33,6 +40,9 @@ export async function PUT(
       where: { id: identityId },
       data: updateData,
     });
+
+    // Invalidate cache so identity pool reflects updated status/token
+    invalidateIdentityPool();
 
     // Mask the token in response
     return success(
@@ -56,9 +66,15 @@ export async function DELETE(
   try {
     const auth = await getAuthUser(req);
     if (!auth) return unauthorized();
+    if (auth.role !== "admin") return forbidden();
 
     const { id } = await ctx.params;
-    const identityId = BigInt(id);
+    let identityId: bigint;
+    try {
+      identityId = BigInt(id);
+    } catch {
+      return error("无效的身份ID", 400);
+    }
 
     const existing = await prisma.adminIdentity.findUnique({
       where: { id: identityId },
@@ -70,6 +86,9 @@ export async function DELETE(
     await prisma.adminIdentity.delete({
       where: { id: identityId },
     });
+
+    // Invalidate cache so deleted identity is no longer selected
+    invalidateIdentityPool();
 
     return success({ deleted: true });
   } catch (err) {

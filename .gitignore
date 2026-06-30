@@ -49,3 +49,5 @@ next-env.d.ts
 # workspace data
 /output/
 login.json
+*login.json
+debug.log

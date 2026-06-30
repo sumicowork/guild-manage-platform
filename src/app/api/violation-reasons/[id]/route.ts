@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, forbidden, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
 
 export async function PUT(
   req: NextRequest,
@@ -9,9 +9,15 @@ export async function PUT(
   try {
     const auth = await getAuthUser(req);
     if (!auth) return unauthorized();
+    if (auth.role !== "admin") return forbidden();
 
     const { id } = await ctx.params;
-    const reasonId = BigInt(id);
+    let reasonId: bigint;
+    try {
+      reasonId = BigInt(id);
+    } catch {
+      return error("无效的违规原因ID", 400);
+    }
 
     const body = await req.json();
     const { name, notificationTemplate, sortOrder } = body;
@@ -60,9 +66,15 @@ export async function DELETE(
   try {
     const auth = await getAuthUser(req);
     if (!auth) return unauthorized();
+    if (auth.role !== "admin") return forbidden();
 
     const { id } = await ctx.params;
-    const reasonId = BigInt(id);
+    let reasonId: bigint;
+    try {
+      reasonId = BigInt(id);
+    } catch {
+      return error("无效的违规原因ID", 400);
+    }
 
     const existing = await prisma.violationReason.findUnique({
       where: { id: reasonId },

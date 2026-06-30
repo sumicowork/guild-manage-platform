@@ -44,6 +44,7 @@ export async function GET(req: NextRequest) {
     const violations = await prisma.violation.findMany({
       where,
       orderBy: { created_at: "desc" },
+      take: 10000, // Safety limit to prevent OOM on very large datasets
       include: {
         user: {
           select: { username: true, display_name: true },

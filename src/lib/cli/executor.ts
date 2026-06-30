@@ -1,8 +1,11 @@
-import { spawnSync } from "child_process";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import fs from "fs";
 import path from "path";
 import { prisma } from "@/lib/db";
 import { switchToIdentity, buildCliEnv } from "./credentials";
+
+const execFileAsync = promisify(execFile);
 
 // ── 限流 & 重试常量（对齐 Python scraper）──────────────────
 const MAX_RETRIES = 5;          // 最大重试次数（含 153）
@@ -11,10 +14,14 @@ const RATE_LIMIT_WAIT_S = 30;  // 153 基础等待时间（秒）
 const MAX_IDENTITY_SWITCHES = 3; // 单次请求内最多切换身份次数
 const IDENTITY_SWITCH_DELAY_MS = 2000; // 切换身份后短延迟（毫秒）
 
+// CLI 超时：poll-token 等操作需要更长，默认 600s
+const CLI_TIMEOUT_MS = Number(process.env.CLI_TIMEOUT_MS) || 600_000;
+
 // ── 全局 153 连续计数（跨请求退避）──────────────────────────
 let _global153Count = 0;
 
 // ── 请求间隔 ─────────────────────────────────────────────
+// 与 .env.example 对齐：默认 1500ms（生产环境可通过 env 覆盖）
 const REQUEST_DELAY_MS = Number(process.env.CLI_REQUEST_DELAY_MS) || 1500;
 let lastCallTime = 0;
 
@@ -32,6 +39,7 @@ const POOL_CACHE_TTL_MS = 60_000; // 1 分钟缓存
 interface IdentityRateLimitState {
   consecutive153: number;   // 连续 153 计数
   cooldownUntil: number;    // 冷却到期时间戳 (ms)
+  authFailed: boolean;      // 8011 标记：token 失效
 }
 const _identityStates = new Map<string, IdentityRateLimitState>();
 
@@ -47,6 +55,7 @@ function delay(ms: number): Promise<void> {
 /**
  * 获取有 token 的管理员身份池（带缓存）。
  * 用于自动选择和 153 切换。
+ * 排除已标记 authFailed 的身份。
  */
 async function getIdentityPool(): Promise<PoolIdentity[]> {
   const now = Date.now();
@@ -74,7 +83,7 @@ function getIdentityState(id: bigint | number): IdentityRateLimitState {
   const key = String(id);
   let state = _identityStates.get(key);
   if (!state) {
-    state = { consecutive153: 0, cooldownUntil: 0 };
+    state = { consecutive153: 0, cooldownUntil: 0, authFailed: false };
     _identityStates.set(key, state);
   }
   return state;
@@ -83,6 +92,7 @@ function getIdentityState(id: bigint | number): IdentityRateLimitState {
 function isIdentityInCooldown(id: bigint | number): boolean {
   const state = _identityStates.get(String(id));
   if (!state) return false;
+  if (state.authFailed) return true; // 8011: permanently bad until re-login
   return Date.now() < state.cooldownUntil;
 }
 
@@ -106,10 +116,16 @@ function resetIdentityCooldown(id: bigint | number): void {
   }
 }
 
+/** 标记身份 token 失效（8011），不再被选中 */
+function markIdentityAuthFailed(id: bigint | number): void {
+  const state = getIdentityState(id);
+  state.authFailed = true;
+}
+
 // ── 自动选择身份（Round-Robin）─────────────────────────────
 
 /**
- * Round-robin 选择一个不在冷却中的身份。
+ * Round-robin 选择一个不在冷却中且未失效的身份。
  * 全部冷却时选冷却最快到期的。
  */
 async function autoSelectIdentity(): Promise<PoolIdentity | null> {
@@ -126,11 +142,12 @@ async function autoSelectIdentity(): Promise<PoolIdentity | null> {
     }
   }
 
-  // 全部冷却中 → 选冷却最快到期的
+  // 全部冷却中 → 选冷却最快到期的（排除 authFailed）
   let earliest: PoolIdentity | null = null;
   let earliestExpiry = Infinity;
   for (const p of pool) {
     const state = _identityStates.get(String(p.id));
+    if (state?.authFailed) continue; // skip permanently failed
     const expiry = state?.cooldownUntil ?? 0;
     if (expiry < earliestExpiry) {
       earliestExpiry = expiry;
@@ -203,7 +220,7 @@ export class CliError extends Error {
   }
 }
 
-// ── 内部：单次执行（throw 带 code 的 Error）──────────────
+// ── 内部：单次执行（异步，不阻塞事件循环）──────────────
 
 interface CliResult {
   code: number;         // exit code 或 JSON error.code
@@ -214,65 +231,76 @@ interface CliResult {
   isEnoent?: boolean;
 }
 
-function executeOnce(cliPath: string, args: string[], customEnv?: NodeJS.ProcessEnv): CliResult {
-  const result = spawnSync(cliPath, args, {
-    stdio: ["pipe", "pipe", "pipe"],
-    timeout: 120_000,
-    maxBuffer: 100 * 1024 * 1024,
-    env: customEnv || { ...process.env },
-  });
+async function executeOnce(cliPath: string, args: string[], customEnv?: NodeJS.ProcessEnv): Promise<CliResult> {
+  try {
+    const { stdout, stderr } = await execFileAsync(cliPath, args, {
+      maxBuffer: 100 * 1024 * 1024,
+      timeout: CLI_TIMEOUT_MS,
+      env: customEnv || { ...process.env },
+    });
 
-  const stdout = result.stdout?.toString("utf-8") || "";
-  const stderr = result.stderr?.toString("utf-8") || "";
+    const stdoutStr = stdout || "";
+    const stderrStr = stderr || "";
 
-  // ENOENT / 超时等 spawnSync 错误
-  if (result.error) {
-    const err = result.error as NodeJS.ErrnoException;
-    return {
-      code: -1,
-      message: err.message,
-      stderr,
-      stdout,
-      isEnoent: err.code === "ENOENT",
-    };
-  }
+    // exit 0 — 解析 JSON
+    const parsed = parseOutput(stdoutStr);
+    if (parsed && typeof parsed === "object" && "success" in parsed) {
+      if ((parsed as any).success) {
+        return { code: 0, message: "ok", data: (parsed as any).data ?? parsed, stdout: stdoutStr };
+      }
+      // success: false — 从 error 字段提取 code
+      const errInfo = (parsed as any).error || {};
+      return {
+        code: errInfo.code ?? -1,
+        message: errInfo.hint || errInfo.message || "Unknown",
+        stderr: JSON.stringify(errInfo),
+        stdout: stdoutStr,
+      };
+    }
 
-  const exitCode = result.status ?? -1;
+    return { code: 0, message: "ok", data: parsed, stdout: stdoutStr };
+  } catch (err: any) {
+    // execFile rejects on non-zero exit or spawn errors
+    const stdoutStr = err.stdout || "";
+    const stderrStr = err.stderr || "";
 
-  // 非零退出码
-  if (exitCode !== 0) {
-    // 尝试从 stdout 提取 JSON 错误码（CLI 有时 exit 非零但 stdout 有 JSON）
+    // ENOENT — CLI not found
+    if (err.code === "ENOENT") {
+      return {
+        code: -1,
+        message: err.message,
+        stderr: stderrStr,
+        stdout: stdoutStr,
+        isEnoent: true,
+      };
+    }
+
+    // Timed out
+    if (err.killed || err.signal === "SIGTERM") {
+      return {
+        code: -1,
+        message: `CLI timed out after ${CLI_TIMEOUT_MS}ms`,
+        stderr: stderrStr,
+        stdout: stdoutStr,
+      };
+    }
+
+    // Non-zero exit — try to extract JSON error code from stdout
+    const exitCode = err.code ?? -1;
     let jsonCode = exitCode;
     try {
-      const parsed = JSON.parse(stdout.trim());
+      const parsed = JSON.parse(stdoutStr.trim());
       if (parsed?.error?.code) jsonCode = parsed.error.code;
+      else if (parsed?.success === false) jsonCode = parsed?.error?.code ?? exitCode;
     } catch { /* use exitCode */ }
 
     return {
       code: jsonCode,
-      message: stdout.trim().slice(0, 300) || `exit ${exitCode}`,
-      stderr,
-      stdout,
+      message: stdoutStr.trim().slice(0, 500) || `exit ${exitCode}`,
+      stderr: stderrStr.slice(0, 500),
+      stdout: stdoutStr,
     };
   }
-
-  // exit 0 — 解析 JSON
-  const parsed = parseOutput(stdout);
-  if (parsed && typeof parsed === "object" && "success" in parsed) {
-    if ((parsed as any).success) {
-      return { code: 0, message: "ok", data: (parsed as any).data ?? parsed, stdout };
-    }
-    // success: false — 从 error 字段提取 code
-    const errInfo = (parsed as any).error || {};
-    return {
-      code: errInfo.code ?? -1,
-      message: errInfo.hint || errInfo.message || "Unknown",
-      stderr: JSON.stringify(errInfo),
-      stdout,
-    };
-  }
-
-  return { code: 0, message: "ok", data: parsed, stdout };
 }
 
 // ── 核心 executor ────────────────────────────────────────
@@ -292,7 +320,7 @@ function executeOnce(cliPath: string, args: string[], customEnv?: NodeJS.Process
  *
  * Other error codes:
  *  - 151 (auth retry): retry with 3s delay
- *  - 8011 (auth failure): throw immediately
+ *  - 8011 (auth failure): mark identity as failed, try switching; throw if none available
  *  - 10014 (data deleted): return null
  */
 export async function executeCli(
@@ -356,11 +384,11 @@ export async function executeCli(
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const cliPath = resolvePath(cliBase);
-    const result = executeOnce(cliPath, args, cliEnv);
+    const result = await executeOnce(cliPath, args, cliEnv);
 
-    // ENOENT → Windows .cmd 重试
+    // ENOENT → Windows .cmd 重试（传递 cliEnv 避免丢失凭证）
     if (result.isEnoent && process.platform === "win32" && !cliPath.endsWith(".cmd")) {
-      const retry = executeOnce(cliPath + ".cmd", args);
+      const retry = await executeOnce(cliPath + ".cmd", args, cliEnv);
       Object.assign(result, retry);
     }
 
@@ -440,8 +468,39 @@ export async function executeCli(
       );
     }
 
-    // ── 8011 未登录：不可恢复 ──
+    // ── 8011 未登录：标记身份失效，尝试切换 ──
     if (result.code === CliErrorCode.AUTH_FAILURE) {
+      if (currentIdentityId) {
+        markIdentityAuthFailed(currentIdentityId);
+        // 同时更新 DB 状态
+        try {
+          await prisma.adminIdentity.update({
+            where: { id: BigInt(currentIdentityId) },
+            data: { status: "expired" },
+          });
+          invalidateIdentityPool();
+        } catch { /* non-critical */ }
+      }
+
+      // 如果未手动指定身份，尝试切换到其他身份
+      if (!userSpecifiedIdentity && identitySwitchCount < MAX_IDENTITY_SWITCHES) {
+        const pool = await getIdentityPool();
+        const alternate = pool.find(
+          (p) => p.id !== currentIdentityId && !isIdentityInCooldown(p.id)
+        );
+        if (alternate) {
+          identitySwitchCount++;
+          console.warn(
+            `[CLI][8011] Identity ${currentIdentityId} auth failed, ` +
+            `switching to ${alternate.id} (${alternate.nickname}) [switch #${identitySwitchCount}]`
+          );
+          currentIdentityId = alternate.id;
+          await switchToIdentity(currentIdentityId);
+          cliEnv = buildCliEnv(currentIdentityId);
+          continue;
+        }
+      }
+
       throw new CliError(
         `CLI auth failure on ${domain} ${action}: token may be expired`,
         CliErrorCode.AUTH_FAILURE,
@@ -468,7 +527,7 @@ export async function executeCli(
 
     // ── 其他错误：短延迟重试 ──
     console.warn(
-      `[CLI] Error ${result.code} on ${domain} ${action}: ${result.message.slice(0, 200)} (尝试 ${attempt}/${MAX_RETRIES})`
+      `[CLI] Error ${result.code} on ${domain} ${action}: ${result.message.slice(0, 300)} (尝试 ${attempt}/${MAX_RETRIES})`
     );
     if (attempt < MAX_RETRIES) {
       await delay(RETRY_DELAY_S * 1000);

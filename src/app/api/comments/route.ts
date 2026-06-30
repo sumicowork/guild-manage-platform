@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase, parsePage, parsePageSize } from "@/lib/api-utils";
 import type { Prisma } from "@/generated/prisma/client";
 
 export async function GET(req: NextRequest) {
@@ -9,8 +9,8 @@ export async function GET(req: NextRequest) {
     if (!auth) return unauthorized();
 
     const { searchParams } = new URL(req.url);
-    const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
-    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "20", 10)));
+    const page = parsePage(searchParams.get("page"), 1);
+    const pageSize = parsePageSize(searchParams.get("pageSize"), 20);
     const search = searchParams.get("search")?.trim() || undefined;
     const status = searchParams.get("status") || "active";
     const feedId = searchParams.get("feedId")?.trim() || undefined;

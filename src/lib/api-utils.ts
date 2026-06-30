@@ -26,6 +26,20 @@ export function error(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
+/** Safely parse a pagination parameter — returns default on NaN/invalid */
+export function parsePage(value: string | null, defaultValue: number): number {
+  const parsed = parseInt(value || String(defaultValue), 10);
+  if (isNaN(parsed) || parsed < 1) return defaultValue;
+  return parsed;
+}
+
+/** Safly parse pageSize, clamped to [1, maxPageSize] */
+export function parsePageSize(value: string | null, defaultValue: number, maxPageSize = 100): number {
+  const parsed = parseInt(value || String(defaultValue), 10);
+  if (isNaN(parsed) || parsed < 1) return defaultValue;
+  return Math.min(maxPageSize, parsed);
+}
+
 // BigInt serializer for JSON responses
 export function serializeBigInt<T>(obj: T): T {
   if (obj === null || obj === undefined) return obj;

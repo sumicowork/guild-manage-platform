@@ -70,6 +70,8 @@ export async function switchToIdentity(identityId: bigint | number | null | unde
   // CLI 自身的 .env 格式使用双引号包裹值，保持一致
   const header = "# QQ AI Connect 凭证 — 敏感信息，勿提交到 git。\n";
   fs.writeFileSync(envPath, header + `QQ_AI_CONNECT_TOKEN="${token}"\n`, "utf-8");
+  // Restrict file permissions to owner-only (0o600) — prevent other users from reading token
+  try { fs.chmodSync(envPath, 0o600); } catch { /* chmod may fail on some platforms */ }
 
   console.log(`[credentials] Switched to admin identity ${identity.id} (${identity.nickname})`);
 }

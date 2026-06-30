@@ -360,7 +360,7 @@ async function createDefaultAdmin(): Promise<void> {
     return;
   }
 
-  const password = await bcrypt.hash("admin123", 12);
+  const password = await bcrypt.hash(process.env.ADMIN_PASSWORD || "admin123", 12);
 
   await prisma.platformUser.create({
     data: {
@@ -371,8 +371,11 @@ async function createDefaultAdmin(): Promise<void> {
     },
   });
 
-  console.log("  Created admin user (username: admin, password: admin123)");
-  console.log("  ⚠  Please change the default password after first login!");
+  console.log("  Created admin user (username: admin)");
+  if (!process.env.ADMIN_PASSWORD) {
+    console.log("  ⚠  Default password is 'admin123' — please change it immediately after first login!");
+    console.log("  ⚠  Or set ADMIN_PASSWORD env var before running this script to use a custom password.");
+  }
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────

@@ -575,43 +575,49 @@ export async function runUpdateCrawl(
         if (typeof feedTime === "number" && (oldestSeenTime === null || feedTime < oldestSeenTime)) {
           oldestSeenTime = feedTime;
         }
-
-        // Check if feed is new or has changed comment count
-        const existing = await prisma.feed.findUnique({
-          where: { feed_id: feed.feed_id },
-          select: { comment_count: true, status: true },
-        });
-
-        if (!existing) {
-          // New feed
-          await upsertFeed(feed);
-          stats.newFeeds++;
-          changedFeedIds.push(feed.feed_id);
-          pageHasChanges = true;
-        } else if (existing.status === "deleted") {
-          // Was marked deleted but now visible again
-          await upsertFeed(feed);
-          stats.updatedFeeds++;
-          pageHasChanges = true;
-        } else if (
-          feed.comment_count !== undefined &&
-          feed.comment_count !== null &&
-          existing.comment_count !== Number(feed.comment_count)
-        ) {
-          // Comment count changed — use direct update to guarantee persistence
-          // (upsertFeed via @prisma/adapter-pg may not always persist Int fields)
-          await prisma.feed.update({
-            where: { feed_id: feed.feed_id },
-            data: { comment_count: Number(feed.comment_count) },
-          });
-          stats.updatedFeeds++;
-          changedFeedIds.push(feed.feed_id);
-          pageHasChanges = true;
-        }
-        // If feed.comment_count is undefined/null, skip the comparison entirely.
-        // Otherwise missing fields would cause a perpetual false-positive loop:
-        //   DB=5 ≠ (undefined ?? 0)=0 → changed → upsert skips field → DB stays 5 → loop
       }
+
+      // Batch-fetch existing feeds to avoid N+1 queries
+      const pageFeedIds = page.feeds.map((f: any) => f.feed_id);
+      const existingFeeds = await prisma.feed.findMany({
+        where: { feed_id: { in: pageFeedIds } },
+        select: { feed_id: true, comment_count: true, status: true },
+      });
+      const existingMap = new Map(existingFeeds.map((f) => [f.feed_id, f]));
+
+      for (const feed of page.feeds) {
+          const existing = existingMap.get(feed.feed_id);
+
+          if (!existing) {
+            // New feed
+            await upsertFeed(feed);
+            stats.newFeeds++;
+            changedFeedIds.push(feed.feed_id);
+            pageHasChanges = true;
+          } else if (existing.status === "deleted") {
+            // Was marked deleted but now visible again — re-activate and fetch comments
+            await upsertFeed(feed);
+            stats.updatedFeeds++;
+            changedFeedIds.push(feed.feed_id);
+            pageHasChanges = true;
+          } else if (
+            feed.comment_count !== undefined &&
+            feed.comment_count !== null &&
+            existing.comment_count !== Number(feed.comment_count)
+          ) {
+            // Comment count changed — use direct update to guarantee persistence
+            await prisma.feed.update({
+              where: { feed_id: feed.feed_id },
+              data: { comment_count: Number(feed.comment_count) },
+            });
+            stats.updatedFeeds++;
+            changedFeedIds.push(feed.feed_id);
+            pageHasChanges = true;
+          }
+          // If feed.comment_count is undefined/null, skip the comparison entirely.
+          // Otherwise missing fields would cause a perpetual false-positive loop:
+          //   DB=5 ≠ (undefined ?? 0)=0 → changed → upsert skips field → DB stays 5 → loop
+        }
 
       if (pageHasChanges) {
         consecutiveCleanPages = 0;
@@ -638,7 +644,7 @@ export async function runUpdateCrawl(
       `Phase 1 complete: ${stats.newFeeds} new feeds, ${stats.updatedFeeds} changed. Fetching comments for ${changedFeedIds.length} feeds.`
     );
 
-    // ── Phase 2: Fetch comments for changed feeds (3 workers) ──
+    // ── Phase 2: Fetch comments for changed feeds (single worker to avoid 153) ──
     if (changedFeedIds.length > 0) {
       log(taskId, "Phase 2: Fetching comments for changed feeds...");
       const WORKER_COUNT = 1; // 单 worker 顺序执行，避免触发 153 限流
@@ -784,6 +790,7 @@ export async function runMemberCrawl(
     }
 
     // Mark members not seen in this crawl as "left"
+    // Only do this if the crawl completed successfully (reached the end of member list)
     const unseenMembers = await prisma.member.findMany({
       where: {
         tinyid: { notIn: Array.from(seenTinyIds) },
@@ -798,7 +805,7 @@ export async function runMemberCrawl(
         where: { tinyid: { in: tinyIds } },
         data: { status: "left", left_at: new Date() },
       });
-      stats["membersLeft"] = unseenMembers.length;
+      stats["membersLeftThisCrawl"] = unseenMembers.length;
       log(taskId, `Marked ${unseenMembers.length} members as left`);
     }
 
@@ -865,17 +872,23 @@ export async function detectDeletions(
   // Detect deleted comments: comments belonging to active feeds
   // where the comment is no longer returned by the API.
   // We check by looking at comment_count vs actual comment records.
-  const feedsWithMismatch = await prisma.$queryRaw<
-    { feed_id: string; comment_count: number; actual_count: bigint }[]
-  >`
-    SELECT f.feed_id, f.comment_count, COUNT(c.id) as actual_count
-    FROM feeds f
-    LEFT JOIN comments c ON c.feed_id = f.feed_id AND c.status = 'active'
-    WHERE f.status = 'active' AND f.comment_count > 0
-    GROUP BY f.feed_id, f.comment_count
-    HAVING COUNT(c.id) > f.comment_count
-    LIMIT 1000
-  `;
+  // Process in batches to avoid loading all mismatched feeds at once
+  let batchOffset = 0;
+  const BATCH_SIZE = 500;
+  while (true) {
+    const feedsWithMismatch = await prisma.$queryRaw<
+      { feed_id: string; comment_count: number; actual_count: bigint }[]
+    >`
+      SELECT f.feed_id, f.comment_count, COUNT(c.id) as actual_count
+      FROM feeds f
+      LEFT JOIN comments c ON c.feed_id = f.feed_id AND c.status = 'active'
+      WHERE f.status = 'active' AND f.comment_count > 0
+      GROUP BY f.feed_id, f.comment_count
+      HAVING COUNT(c.id) > f.comment_count
+      LIMIT ${BATCH_SIZE} OFFSET ${batchOffset}
+    `;
+
+    if (feedsWithMismatch.length === 0) break;
 
   // For feeds where we have more comments in DB than the API reports,
   // the excess comments may have been deleted. We mark the oldest excess ones.
@@ -900,12 +913,14 @@ export async function detectDeletions(
     }
   }
 
-  // Detect members who left: active members not seen in any recent crawl
-  // (This is handled in runMemberCrawl — here we just report the count)
-  const leftMembers = await prisma.member.count({
+    batchOffset += BATCH_SIZE;
+  }
+
+  // Count members who have left (historical total, not just this crawl)
+  const leftMembersTotal = await prisma.member.count({
     where: { status: "left" },
   });
-  membersLeft = leftMembers;
+  membersLeft = leftMembersTotal;
 
   console.log(
     `[Crawler] Deletion detection: ${feedsDeleted} feeds, ${commentsDeleted} comments, ${membersLeft} members left`

@@ -59,7 +59,7 @@ async function main() {
           },
         });
       })
-      .filter(Boolean);
+      .filter((op): op is NonNullable<typeof op> => op !== null);
 
     if (ops.length > 0) {
       await prisma.$transaction(ops, { maxWait: 30000, timeout: 60000 });
@@ -87,7 +87,7 @@ async function main() {
           data: { create_time_raw: raw },
         });
       })
-      .filter(Boolean);
+      .filter((op): op is NonNullable<typeof op> => op !== null);
 
     if (ops.length > 0) {
       await prisma.$transaction(ops, { maxWait: 30000, timeout: 60000 });

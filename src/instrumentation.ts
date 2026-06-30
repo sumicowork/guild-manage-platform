@@ -7,7 +7,7 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     try {
       const { initScheduler } = await import("@/services/scheduler");
-      initScheduler();
+      await initScheduler();
       console.log("[Instrumentation] Scheduler initialized");
     } catch (err) {
       console.error("[Instrumentation] Failed to initialize scheduler:", err);

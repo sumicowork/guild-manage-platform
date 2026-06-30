@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, success, error, serializeBigInt, toCamelCase } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, forbidden, success, error, serializeBigInt, toCamelCase, parsePage, parsePageSize } from "@/lib/api-utils";
 import type { Prisma } from "@/generated/prisma/client";
 import { movePost, deletePost, deleteComment, deleteReply, postComment } from "@/lib/cli/feed";
 import { muteUser, kickUser, sendDM } from "@/lib/cli/member";
@@ -41,8 +41,8 @@ export async function GET(req: NextRequest) {
     if (!auth) return unauthorized();
 
     const { searchParams } = new URL(req.url);
-    const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
-    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "20", 10)));
+    const page = parsePage(searchParams.get("page"), 1);
+    const pageSize = parsePageSize(searchParams.get("pageSize"), 20);
     const targetType = searchParams.get("target_type") || undefined;
     const violationReason = searchParams.get("reason") || undefined;
     const actionType = searchParams.get("actionType") || undefined;
@@ -136,7 +136,9 @@ export async function POST(req: NextRequest) {
   try {
     const auth = await getAuthUser(req);
     if (!auth) return unauthorized();
+    if (auth.role !== "admin") return forbidden();
 
+    // Idempotency: check for duplicate violation in the last 5 minutes
     const body = await req.json();
     const {
       targetType,
@@ -171,8 +173,22 @@ export async function POST(req: NextRequest) {
       return error("缺少必要参数：targetType, targetId, violationReason/reasonId, actionType, adminIdentityId", 400);
     }
 
+    // Idempotency: reject duplicate violation (same target+action) within 5 minutes
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const recentDuplicate = await prisma.violation.findFirst({
+      where: {
+        target_id: targetId,
+        action_type: actionType,
+        created_at: { gte: fiveMinAgo },
+      },
+      select: { id: true },
+    });
+    if (recentDuplicate) {
+      return error("该目标在 5 分钟内已有相同的违规处置记录，请勿重复操作", 409);
+    }
+
     // Always resolve target info from DB for CLI execution
-    let resolvedTargetAuthor: string | null = targetAuthorId ? null : null;
+    let resolvedTargetAuthor: string | null = null;
     let resolvedTargetAuthorId: string | null = targetAuthorId || null;
     let resolvedTargetFeedId: string | null = targetFeedId || null;
     let targetTitle: string = "";
@@ -295,6 +311,7 @@ export async function POST(req: NextRequest) {
 
     // ─── Execute CLI actions (move/delete/mute) ───────────────────────
     const cliResults: string[] = [];
+    const cliErrors: string[] = [];
     const isMove = actionType.includes("move");
     const isDelete = actionType.includes("delete");
     const shouldMute = !!mute?.duration;
@@ -304,62 +321,86 @@ export async function POST(req: NextRequest) {
       // move-feed requires numeric IDs for both target and original channel
       const originalChannel = targetChannelId || "";
       if (!isNumericId(targetChannel)) {
-        cliResults.push(`移帖失败: 目标版块 "${targetChannel}" 没有数字ID，无法执行移帖`);
+        cliErrors.push(`移帖失败: 目标版块 "${targetChannel}" 没有数字ID，无法执行移帖`);
       } else if (!isNumericId(originalChannel)) {
-        cliResults.push("移帖失败: 帖子当前版块没有数字ID，无法执行移帖");
+        cliErrors.push("移帖失败: 帖子当前版块没有数字ID，无法执行移帖");
       } else {
-        const ok = await movePost(GUILD_ID, resolvedTargetFeedId, targetChannel, originalChannel, adminIdentityId);
-        cliResults.push(ok ? "移帖成功" : "移帖失败");
-        if (ok) {
-          await prisma.feed.update({
-            where: { feed_id: resolvedTargetFeedId },
-            data: { status: "moved" },
-          });
+        try {
+          const ok = await movePost(GUILD_ID, resolvedTargetFeedId, targetChannel, originalChannel, adminIdentityId);
+          cliResults.push(ok ? "移帖成功" : "移帖失败");
+          if (ok) {
+            await prisma.feed.update({
+              where: { feed_id: resolvedTargetFeedId },
+              data: { status: "moved" },
+            });
+          } else {
+            cliErrors.push("移帖失败");
+          }
+        } catch (e) {
+          cliErrors.push(`移帖异常: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
     }
 
     if (isDelete) {
       if (targetType === "feed" && resolvedTargetFeedId) {
-        const ok = await deletePost(GUILD_ID, resolvedTargetFeedId, targetChannelId || targetChannelName || "", feedCreateTimeStr, adminIdentityId);
-        cliResults.push(ok ? "删帖成功" : "删帖失败");
-        if (ok) {
-          await prisma.feed.update({
-            where: { feed_id: resolvedTargetFeedId },
-            data: { status: "deleted", deleted_at: new Date() },
-          });
+        try {
+          const ok = await deletePost(GUILD_ID, resolvedTargetFeedId, targetChannelId || targetChannelName || "", feedCreateTimeStr, adminIdentityId);
+          cliResults.push(ok ? "删帖成功" : "删帖失败");
+          if (ok) {
+            await prisma.feed.update({
+              where: { feed_id: resolvedTargetFeedId },
+              data: { status: "deleted", deleted_at: new Date() },
+            });
+          } else {
+            cliErrors.push("删帖失败");
+          }
+        } catch (e) {
+          cliErrors.push(`删帖异常: ${e instanceof Error ? e.message : String(e)}`);
         }
       } else if (targetType === "comment" && resolvedTargetFeedId && targetCommentId) {
-        const ok = await deleteComment(
-          resolvedTargetFeedId, GUILD_ID, targetCommentId,
-          targetCommentAuthorId || "", feedCreateTimeStr, adminIdentityId
-        );
-        cliResults.push(ok ? "删评论成功" : "删评论失败");
-        if (ok) {
-          await prisma.comment.update({
-            where: { comment_id: targetCommentId },
-            data: { status: "deleted", deleted_at: new Date() },
-          });
+        try {
+          const ok = await deleteComment(
+            resolvedTargetFeedId, GUILD_ID, targetCommentId,
+            targetCommentAuthorId || "", feedCreateTimeStr, adminIdentityId
+          );
+          cliResults.push(ok ? "删评论成功" : "删评论失败");
+          if (ok) {
+            await prisma.comment.update({
+              where: { comment_id: targetCommentId },
+              data: { status: "deleted", deleted_at: new Date() },
+            });
+          } else {
+            cliErrors.push("删评论失败");
+          }
+        } catch (e) {
+          cliErrors.push(`删评论异常: ${e instanceof Error ? e.message : String(e)}`);
         }
       } else if (targetType === "reply") {
         const commentCreateTimeStr = targetCommentCreateTimeRaw ? String(targetCommentCreateTimeRaw) : "";
-        const ok = await deleteReply(
-          resolvedTargetFeedId || "", GUILD_ID, targetCommentId || "",
-          targetId,
-          {
-            feedAuthorId: targetFeedAuthorId || "",
-            feedCreateTime: feedCreateTimeStr,
-            commentAuthorId: targetCommentAuthorId || "",
-            commentCreateTime: commentCreateTimeStr,
-          },
-          adminIdentityId
-        );
-        cliResults.push(ok ? "删回复成功" : "删回复失败");
-        if (ok) {
-          await prisma.reply.update({
-            where: { reply_id: targetId },
-            data: { status: "deleted", deleted_at: new Date() },
-          });
+        try {
+          const ok = await deleteReply(
+            resolvedTargetFeedId || "", GUILD_ID, targetCommentId || "",
+            targetId,
+            {
+              feedAuthorId: targetFeedAuthorId || "",
+              feedCreateTime: feedCreateTimeStr,
+              commentAuthorId: targetCommentAuthorId || "",
+              commentCreateTime: commentCreateTimeStr,
+            },
+            adminIdentityId
+          );
+          cliResults.push(ok ? "删回复成功" : "删回复失败");
+          if (ok) {
+            await prisma.reply.update({
+              where: { reply_id: targetId },
+              data: { status: "deleted", deleted_at: new Date() },
+            });
+          } else {
+            cliErrors.push("删回复失败");
+          }
+        } catch (e) {
+          cliErrors.push(`删回复异常: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
     }
@@ -367,8 +408,13 @@ export async function POST(req: NextRequest) {
     if (shouldMute && resolvedTargetAuthorId) {
       const durationSeconds = parseDurationToSeconds(mute.duration);
       const expiryTimestamp = String(Math.floor(Date.now() / 1000) + durationSeconds);
-      const ok = await muteUser(GUILD_ID, resolvedTargetAuthorId, expiryTimestamp, adminIdentityId);
-      cliResults.push(ok ? `禁言(${mute.duration})成功` : "禁言失败");
+      try {
+        const ok = await muteUser(GUILD_ID, resolvedTargetAuthorId, expiryTimestamp, adminIdentityId);
+        cliResults.push(ok ? `禁言(${mute.duration})成功` : "禁言失败");
+        if (!ok) cliErrors.push("禁言失败");
+      } catch (e) {
+        cliErrors.push(`禁言异常: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
 
     // ─── Send notification ────────────────────────────────────────────
@@ -385,10 +431,14 @@ export async function POST(req: NextRequest) {
         reason: resolvedReason,
       });
 
-      if (notifType === "reply" && resolvedTargetFeedId) {
-        notificationSent = await postComment(resolvedTargetFeedId, GUILD_ID, finalText, feedCreateTimeStr, adminIdentityId);
-      } else if (notifType === "dm") {
-        notificationSent = await sendDM(GUILD_ID, resolvedTargetAuthorId, finalText, adminIdentityId);
+      try {
+        if (notifType === "reply" && resolvedTargetFeedId) {
+          notificationSent = await postComment(resolvedTargetFeedId, GUILD_ID, finalText, feedCreateTimeStr, adminIdentityId);
+        } else if (notifType === "dm") {
+          notificationSent = await sendDM(GUILD_ID, resolvedTargetAuthorId, finalText, adminIdentityId);
+        }
+      } catch (e) {
+        cliErrors.push(`通知异常: ${e instanceof Error ? e.message : String(e)}`);
       }
 
       // Update violation record with notification status
@@ -416,6 +466,7 @@ export async function POST(req: NextRequest) {
 
     const result = toCamelCase(serializeBigInt(updated)) as any;
     result.cliResults = cliResults;
+    result.cliErrors = cliErrors;
 
     return success(result);
   } catch (err) {

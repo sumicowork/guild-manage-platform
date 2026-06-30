@@ -11,7 +11,12 @@ export async function GET(
     if (!auth) return unauthorized();
 
     const { id } = await ctx.params;
-    const taskId = BigInt(id);
+    let taskId: bigint;
+    try {
+      taskId = BigInt(id);
+    } catch {
+      return error("无效的任务ID", 400);
+    }
 
     const task = await prisma.crawlTask.findUnique({
       where: { id: taskId },
