@@ -25,12 +25,13 @@ import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { Plus, Trash2, Loader2, Bot, Pencil } from 'lucide-react';
+import { Plus, Trash2, Loader2, Bot, Pencil, Hash } from 'lucide-react';
 
 interface AutoRule {
   id: number;
   name: string;
   targetAuthorId: string;
+  targetAuthorName: string | null;
   action: 'delete' | 'move';
   targetChannelId: string | null;
   enabled: boolean;
@@ -38,9 +39,15 @@ interface AutoRule {
   updatedAt: string;
 }
 
+interface Channel {
+  id: string;
+  name: string;
+}
+
 export default function AutoRulePanel() {
   const [rules, setRules] = useState<AutoRule[]>([]);
   const [loading, setLoading] = useState(true);
+  const [channels, setChannels] = useState<Channel[]>([]);
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -54,6 +61,9 @@ export default function AutoRulePanel() {
   const [formChannelId, setFormChannelId] = useState('');
   const [formEnabled, setFormEnabled] = useState(true);
 
+  // Channel name map: id → name
+  const channelNameMap = new Map(channels.map((c) => [c.id, c.name]));
+
   const fetchRules = useCallback(async () => {
     try {
       const data = await api.get<AutoRule[]>('/auto-rules');
@@ -65,9 +75,19 @@ export default function AutoRulePanel() {
     }
   }, []);
 
+  const fetchChannels = useCallback(async () => {
+    try {
+      const data = await api.get<Channel[]>('/channels');
+      setChannels(data);
+    } catch {
+      // channels fetch failure is non-critical
+    }
+  }, []);
+
   useEffect(() => {
     fetchRules();
-  }, [fetchRules]);
+    fetchChannels();
+  }, [fetchRules, fetchChannels]);
 
   const openCreateDialog = () => {
     setEditingRule(null);
@@ -95,7 +115,7 @@ export default function AutoRulePanel() {
       return;
     }
     if (formAction === 'move' && !formChannelId.trim()) {
-      toast.error('移帖操作必须指定目标版块ID');
+      toast.error('移帖操作必须选择目标版块');
       return;
     }
 
@@ -146,14 +166,18 @@ export default function AutoRulePanel() {
     }
   };
 
-  const actionLabel = (action: string) => {
-    return action === 'delete' ? '删除帖子' : '移帖';
-  };
-
-  const actionColor = (action: string) => {
-    return action === 'delete'
+  const actionLabel = (action: string) => (action === 'delete' ? '删除帖子' : '移帖');
+  const actionColor = (action: string) =>
+    action === 'delete'
       ? 'bg-red-50 text-red-600 border-red-200'
       : 'bg-blue-50 text-blue-600 border-blue-200';
+
+  // Human-readable author display
+  const authorDisplay = (rule: AutoRule) => {
+    if (rule.targetAuthorName) {
+      return rule.targetAuthorName;
+    }
+    return rule.targetAuthorId;
   };
 
   return (
@@ -197,19 +221,22 @@ export default function AutoRulePanel() {
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <span className="text-sm font-medium text-gray-900">{rule.name}</span>
                         <Badge className={`text-xs ${actionColor(rule.action)}`}>
                           {actionLabel(rule.action)}
                         </Badge>
                         {rule.action === 'move' && rule.targetChannelId && (
                           <Badge variant="outline" className="text-xs">
-                            目标版块: {rule.targetChannelId}
+                            移至「{channelNameMap.get(rule.targetChannelId) ?? rule.targetChannelId}」
                           </Badge>
                         )}
                       </div>
-                      <p className="text-xs text-gray-400 font-mono">
-                        tinyid: {rule.targetAuthorId}
+                      <p className="text-xs text-gray-400">
+                        作者: {authorDisplay(rule)}
+                        {rule.targetAuthorName && (
+                          <span className="text-gray-300 ml-1">({rule.targetAuthorId})</span>
+                        )}
                       </p>
                     </div>
                   </div>
@@ -258,11 +285,11 @@ export default function AutoRulePanel() {
               />
             </div>
             <div className="space-y-2">
-              <Label>目标作者 tinyid</Label>
+              <Label>目标作者</Label>
               <Input
                 value={formAuthorId}
                 onChange={(e) => setFormAuthorId(e.target.value)}
-                placeholder="144115220736883034"
+                placeholder="tinyid，如 144115220736883034"
               />
               <p className="text-xs text-gray-400">
                 与此 tinyid 匹配的帖子将被自动处理
@@ -285,12 +312,30 @@ export default function AutoRulePanel() {
             </div>
             {formAction === 'move' && (
               <div className="space-y-2">
-                <Label>目标版块ID</Label>
-                <Input
-                  value={formChannelId}
-                  onChange={(e) => setFormChannelId(e.target.value)}
-                  placeholder="版块数字ID"
-                />
+                <Label>目标版块</Label>
+                {channels.length > 0 ? (
+                  <Select value={formChannelId} onValueChange={(v) => setFormChannelId(v ?? '')}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择目标版块..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {channels.map((ch) => (
+                        <SelectItem key={ch.id} value={ch.id}>
+                          <span className="flex items-center gap-2">
+                            <Hash className="size-3 text-gray-400" />
+                            {ch.name}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    value={formChannelId}
+                    onChange={(e) => setFormChannelId(e.target.value)}
+                    placeholder="版块ID（暂无法加载版块列表）"
+                  />
+                )}
                 <p className="text-xs text-gray-400">
                   帖子将被移动到此版块
                 </p>

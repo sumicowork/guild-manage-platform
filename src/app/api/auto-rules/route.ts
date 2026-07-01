@@ -11,10 +11,22 @@ export async function GET(req: NextRequest) {
       orderBy: { created_at: "desc" },
     });
 
+    // Batch lookup member names for target author tinyids
+    const tinyIds = [...new Set(rules.map((r) => r.target_author_id).filter(Boolean))];
+    const members =
+      tinyIds.length > 0
+        ? await prisma.member.findMany({
+            where: { tinyid: { in: tinyIds } },
+            select: { tinyid: true, nickname: true },
+          })
+        : [];
+    const memberNameMap = new Map(members.map((m) => [m.tinyid, m.nickname]));
+
     const rawRules = serializeBigInt(rules);
     const mapped = (toCamelCase(rawRules) as any[]).map((r: any) => ({
       ...r,
       id: Number(r.id),
+      targetAuthorName: memberNameMap.get(r.targetAuthorId) || null,
     }));
     return success(mapped);
   } catch (err) {
