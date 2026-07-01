@@ -61,6 +61,14 @@ interface Feed {
       targetUser?: string | null;
     }>;
   }>;
+  matchedComments?: MatchedComment[];
+}
+
+interface MatchedComment {
+  commentId: string;
+  author: string;
+  contentText: string;
+  createTime: string;
 }
 
 interface Channel {
@@ -94,6 +102,21 @@ const statusLabels: Record<string, string> = {
   deleted: '已删除',
   moved: '已移帖',
 };
+
+/**
+ * Highlight search terms in text by wrapping matches in <mark> tags.
+ */
+function highlightText(text: string, query: string): React.ReactNode {
+  if (!query) return text;
+  // Split by case-insensitive match, preserving original text
+  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  const parts = text.split(regex);
+  return parts.map((part, i) =>
+    regex.test(part)
+      ? <mark key={i} className="bg-yellow-200 text-yellow-900 rounded px-0.5">{part}</mark>
+      : part
+  );
+}
 
 export default function FeedsPage() {
   const [feeds, setFeeds] = useState<Feed[]>([]);
@@ -196,7 +219,7 @@ export default function FeedsPage() {
         <div className="relative">
           <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-gray-400" />
           <Input
-            placeholder="搜索标题/作者/内容..."
+            placeholder="搜索标题/作者/帖子内容/评论内容..."
             className="w-60 pl-8"
             value={search}
             onChange={(e) => {
@@ -330,6 +353,32 @@ export default function FeedsPage() {
                       +{feed.images.length - 3}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Matched comments from search */}
+              {search && feed.matchedComments && feed.matchedComments.length > 0 && (
+                <div className="mb-3 space-y-2">
+                  <div className="text-xs text-gray-400 font-medium">
+                    匹配评论 ({feed.matchedComments.length})
+                  </div>
+                  {feed.matchedComments.map((c) => (
+                    <div
+                      key={c.commentId}
+                      className="text-xs bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className="font-medium text-gray-700">{c.author}</span>
+                        <span className="text-gray-400">
+                          {new Date(c.createTime).toLocaleString('zh-CN')}
+                        </span>
+                      </div>
+                      <p className="text-gray-600 leading-relaxed">
+                        {highlightText(c.contentText, search)}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               )}
 
