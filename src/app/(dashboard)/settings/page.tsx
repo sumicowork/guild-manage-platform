@@ -18,6 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import { Plus, Trash2, Loader2, Users, Shield, Terminal, RefreshCw, ExternalLink } from 'lucide-react';
+import AutoRulePanel from './auto-rule-panel';
 
 interface PlatformUser {
   id: number;
@@ -498,6 +499,9 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Auto Rules */}
+      <AutoRulePanel />
 
       {/* CLI Tool Status */}
       <Card className="bg-white border-gray-200">

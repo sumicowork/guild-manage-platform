@@ -4,6 +4,8 @@ import {
   getFeedComments,
   getFeedDetail,
   getNextPageReplies,
+  deletePost,
+  movePost,
 } from "@/lib/cli/feed";
 import { getGuildMembers } from "@/lib/cli/member";
 import fs from "fs";
@@ -571,7 +573,16 @@ export async function runUpdateCrawl(
     commentsAdded: 0,
     cleanPages: 0,
     errors: 0,
+    autoActions: 0, // auto-rule actions
   };
+
+  // Load enabled auto-rules for real-time enforcement during crawl
+  const autoRules = await prisma.autoRule.findMany({
+    where: { enabled: true },
+  });
+  if (autoRules.length > 0) {
+    log(taskId, `Loaded ${autoRules.length} enabled auto-rule(s): ${autoRules.map(r => r.name).join(', ')}`);
+  }
 
   try {
     // ── Phase 1: Scan feeds for changes ──
@@ -620,8 +631,73 @@ export async function runUpdateCrawl(
             // New feed
             await upsertFeed(feed);
             stats.newFeeds++;
-            changedFeedIds.push(feed.feed_id);
             pageHasChanges = true;
+
+            // ── Auto-rule enforcement: check if this feed should be auto-handled ──
+            if (autoRules.length > 0 && feed.author_id) {
+              const matchedRule = autoRules.find(
+                (r) => r.target_author_id === feed.author_id
+              );
+              if (matchedRule) {
+                const feedChannelId = feed.channel_id ? String(feed.channel_id) : "";
+                const feedCreateTime = typeof feed.create_time === "string"
+                  ? feed.create_time
+                  : (typeof feed.create_time_raw === "number"
+                    ? new Date(feed.create_time_raw * 1000).toISOString().replace("T", " ").slice(0, 19)
+                    : "");
+
+                try {
+                  let actionOk = false;
+                  if (matchedRule.action === "delete") {
+                    actionOk = await deletePost(
+                      gid,
+                      feed.feed_id,
+                      feedChannelId,
+                      feedCreateTime,
+                      adminIdentityId
+                    );
+                    if (actionOk) {
+                      await prisma.feed.update({
+                        where: { feed_id: feed.feed_id },
+                        data: { status: "deleted", deleted_at: new Date() },
+                      });
+                    }
+                  } else if (matchedRule.action === "move" && matchedRule.target_channel_id) {
+                    actionOk = await movePost(
+                      gid,
+                      feed.feed_id,
+                      matchedRule.target_channel_id,
+                      feedChannelId,
+                      adminIdentityId
+                    );
+                    if (actionOk) {
+                      await prisma.feed.update({
+                        where: { feed_id: feed.feed_id },
+                        data: { status: "moved" },
+                      });
+                    }
+                  }
+
+                  if (actionOk) {
+                    stats.autoActions++;
+                    log(
+                      taskId,
+                      `[AutoRule] ${matchedRule.name}: ${matchedRule.action} feed ${feed.feed_id} (author: ${feed.author ?? feed.author_id})`
+                    );
+                    // Skip comment fetching for this feed — it's been handled
+                    continue;
+                  }
+                } catch (err) {
+                  stats.errors++;
+                  console.error(
+                    `[AutoRule] Failed to execute ${matchedRule.action} on feed ${feed.feed_id}:`,
+                    err
+                  );
+                }
+              }
+            }
+
+            changedFeedIds.push(feed.feed_id);
           } else if (existing.status === "deleted") {
             // Was marked deleted but now visible again — re-activate and fetch comments
             await upsertFeed(feed);

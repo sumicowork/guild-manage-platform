@@ -261,6 +261,22 @@ model CrawlTask {
   @@map("crawl_tasks")
 }
 
+// ─── 自动处置规则 ───
+model AutoRule {
+  id                BigInt    @id @default(autoincrement())
+  name              String                        // 规则名称
+  target_author_id  String                        // 目标作者 tinyid
+  action            String    @default("delete")  // "delete" | "move"
+  target_channel_id String?                       // 移帖目标版块ID（action=move 时必填）
+  enabled           Boolean   @default(true)      // 是否启用
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  @@index([target_author_id])
+  @@index([enabled])
+  @@map("auto_rules")
+}
+
 // ─── 操作日志（审计追踪） ───
 model OperationLog {
   id            BigInt   @id @default(autoincrement())
