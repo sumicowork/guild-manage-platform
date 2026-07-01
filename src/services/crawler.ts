@@ -640,11 +640,7 @@ export async function runUpdateCrawl(
               );
               if (matchedRule) {
                 const feedChannelId = feed.channel_id ? String(feed.channel_id) : "";
-                const feedCreateTime = typeof feed.create_time === "string"
-                  ? feed.create_time
-                  : (typeof feed.create_time_raw === "number"
-                    ? new Date(feed.create_time_raw * 1000).toISOString().replace("T", " ").slice(0, 19)
-                    : "");
+                const feedCreateTime = feed.create_time_raw ? String(feed.create_time_raw) : "";
 
                 try {
                   let actionOk = false;
