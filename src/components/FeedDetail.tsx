@@ -129,7 +129,7 @@ function ReplyItem({
           </span>
         </div>
         <p className={`mt-1 text-sm whitespace-pre-wrap ${reply.status === 'deleted' ? 'text-gray-400 italic' : 'text-gray-700'}`}>
-          {reply.status === 'deleted' ? '(此回复已被删除)' : reply.content}
+          {reply.status === 'deleted' ? '(此评论已被删除)' : reply.content}
         </p>
       </div>
     </div>

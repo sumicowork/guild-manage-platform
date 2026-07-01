@@ -269,7 +269,7 @@ export async function POST(req: NextRequest) {
       targetExists = !!(await prisma.reply.findUnique({ where: { reply_id: targetId }, select: { reply_id: true } }));
     }
     if (!targetExists) {
-      return error(`目标${targetType === "feed" ? "帖子" : targetType === "comment" ? "评论" : "回复"} (${targetId}) 在数据库中不存在，请先爬取数据`, 400);
+      return error(`目标${targetType === "feed" ? "帖子" : "评论"} (${targetId}) 在数据库中不存在，请先爬取数据`, 400);
     }
 
     // Build action_detail from client fields
@@ -390,17 +390,17 @@ export async function POST(req: NextRequest) {
             },
             adminIdentityId
           );
-          cliResults.push(ok ? "删回复成功" : "删回复失败");
+          cliResults.push(ok ? "删评论成功" : "删评论失败");
           if (ok) {
             await prisma.reply.update({
               where: { reply_id: targetId },
               data: { status: "deleted", deleted_at: new Date() },
             });
           } else {
-            cliErrors.push("删回复失败");
+            cliErrors.push("删评论失败");
           }
         } catch (e) {
-          cliErrors.push(`删回复异常: ${e instanceof Error ? e.message : String(e)}`);
+          cliErrors.push(`删评论异常: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
     }

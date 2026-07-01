@@ -49,7 +49,7 @@ const actionColors: Record<string, string> = {
 const targetTypeLabels: Record<string, string> = {
   feed: '帖子',
   comment: '评论',
-  reply: '回复',
+  reply: '评论',
 };
 
 export default function ViolationsPage() {

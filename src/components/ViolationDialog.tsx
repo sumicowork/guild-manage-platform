@@ -175,7 +175,7 @@ export function ViolationDialog({
           { value: 'delete', label: '删帖' },
         ]
       : targetType === 'reply'
-      ? [{ value: 'delete_reply', label: '删回复' }]
+      ? [{ value: 'delete_reply', label: '删评论' }]
       : [{ value: 'delete_comment', label: '删评论' }];
 
   const targetLabel = targetType === 'feed' ? '帖子' : '评论';
@@ -362,7 +362,7 @@ export function ViolationDialog({
                       onClick={() => setNotifyType('reply')}
                       type="button"
                     >
-                      评论回复
+                      评论
                     </Button>
                     <Button
                       variant={notifyType === 'dm' ? 'default' : 'outline'}

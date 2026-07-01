@@ -105,7 +105,7 @@ type Tab = 'feeds' | 'comments' | 'replies' | 'violations';
 const tabs: { key: Tab; label: string }[] = [
   { key: 'feeds', label: '发帖' },
   { key: 'comments', label: '评论' },
-  { key: 'replies', label: '回复' },
+  { key: 'replies', label: '评论' },
   { key: 'violations', label: '违规' },
 ];
 
@@ -159,7 +159,7 @@ export function MemberDetailDialog({ tinyid, open, onOpenChange }: MemberDetailD
                 {[
                   { label: '发帖', value: data.stats.feedCount },
                   { label: '评论', value: data.stats.commentCount },
-                  { label: '回复', value: data.stats.replyCount },
+                  { label: '评论', value: data.stats.replyCount },
                   { label: '获赞', value: data.stats.likeCount },
                   { label: '违规', value: data.stats.violationCount },
                 ].map((stat) => (
@@ -273,7 +273,7 @@ export function MemberDetailDialog({ tinyid, open, onOpenChange }: MemberDetailD
                       ))}
                     </div>
                   ) : (
-                    <p className="py-8 text-center text-sm text-gray-400">暂无回复</p>
+                    <p className="py-8 text-center text-sm text-gray-400">暂无评论</p>
                   )
                 )}
 
