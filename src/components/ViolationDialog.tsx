@@ -407,9 +407,9 @@ export function ViolationDialog({
             )}
 
             {/* Role Group (optional) */}
-            {roleGroups.length > 0 && (
-              <div className="space-y-2">
-                <Label>划归身份组（可选）</Label>
+            <div className="space-y-2">
+              <Label>划归身份组（可选）</Label>
+              {roleGroups.length > 0 ? (
                 <Select value={roleGroupId} onValueChange={(v) => setRoleGroupId(v ?? '')}>
                   <SelectTrigger className="w-full">
                     <span className="text-sm">{roleGroupId ? (roleGroups.find(r => r.id === roleGroupId)?.name || '不限') : '不限'}</span>
@@ -423,8 +423,14 @@ export function ViolationDialog({
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-            )}
+              ) : (
+                <Input
+                  value={roleGroupId}
+                  onChange={(e) => setRoleGroupId(e.target.value)}
+                  placeholder="输入身份组 ID（暂时无法加载列表）"
+                />
+              )}
+            </div>
           </div>
         )}
 
