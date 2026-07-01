@@ -23,15 +23,18 @@ export async function GET(req: NextRequest) {
     });
 
     const channels: { id: string; name: string }[] = [];
+    const seenNames = new Set<string>();
 
     for (const f of feedsWithId) {
       if (f.channel_id) {
-        channels.push({ id: f.channel_id, name: f.channel_name ?? f.channel_id });
+        const name = f.channel_name ?? f.channel_id;
+        channels.push({ id: f.channel_id, name });
+        seenNames.add(name);
       }
     }
 
     for (const f of feedsWithoutId) {
-      if (f.channel_name) {
+      if (f.channel_name && !seenNames.has(f.channel_name)) {
         channels.push({ id: f.channel_name, name: f.channel_name });
       }
     }
