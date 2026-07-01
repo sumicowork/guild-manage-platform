@@ -183,3 +183,28 @@ export async function sendDM(
     return false;
   }
 }
+
+/**
+ * Add a member to a role group.
+ *
+ * CLI: `manage add-role-members --json`
+ * stdin: { guild_id, role_id, tiny_ids: [tinyId] }
+ */
+export async function addRoleMembers(
+  guildId: string,
+  roleId: string,
+  tinyIds: string[],
+  adminIdentityId?: bigint | number | null
+): Promise<boolean> {
+  try {
+    await executeCli("manage", "add-role-members", {
+      guild_id: guildId,
+      role_id: roleId,
+      tiny_ids: tinyIds,
+    }, adminIdentityId);
+    return true;
+  } catch (err) {
+    console.error(`[CLI] addRoleMembers failed for role=${roleId}:`, err);
+    return false;
+  }
+}
