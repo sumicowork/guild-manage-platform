@@ -17,6 +17,7 @@ interface Reply {
   author: string;
   authorId: string;
   content: string;
+  contentImages?: string[];
   createdAt: string;
   likeCount: number;
   status: string;
@@ -31,6 +32,7 @@ interface Comment {
   authorId: string;
   feedId: string;
   content: string;
+  contentImages?: string[];
   createdAt: string;
   likeCount: number;
   status: string;
@@ -131,6 +133,19 @@ function ReplyItem({
         <p className={`mt-1 text-sm whitespace-pre-wrap ${reply.status === 'deleted' ? 'text-gray-400 italic' : 'text-gray-700'}`}>
           {reply.status === 'deleted' ? '(此评论已被删除)' : reply.content}
         </p>
+        {reply.status !== 'deleted' && reply.contentImages && reply.contentImages.length > 0 && (
+          <div className="mt-2 flex gap-1.5 flex-wrap">
+            {reply.contentImages.map((img, i) => (
+              <img
+                key={i}
+                src={img}
+                alt={`图片 ${i + 1}`}
+                referrerPolicy="no-referrer"
+                className="size-16 rounded-lg object-cover ring-1 ring-gray-200"
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -166,6 +181,19 @@ function CommentItem({
       <p className={`mt-1.5 text-sm whitespace-pre-wrap ${comment.status === 'deleted' ? 'text-gray-400 italic' : 'text-gray-700'}`}>
         {comment.status === 'deleted' ? '(此评论已被删除)' : comment.content}
       </p>
+      {comment.status !== 'deleted' && comment.contentImages && comment.contentImages.length > 0 && (
+        <div className="mt-2 flex gap-1.5 flex-wrap">
+          {comment.contentImages.map((img, i) => (
+            <img
+              key={i}
+              src={img}
+              alt={`图片 ${i + 1}`}
+              referrerPolicy="no-referrer"
+              className="size-16 rounded-lg object-cover ring-1 ring-gray-200"
+            />
+          ))}
+        </div>
+      )}
       {/* Nested replies (层中层) */}
       {comment.replies && comment.replies.length > 0 && (
         <div className="mt-2 space-y-0">

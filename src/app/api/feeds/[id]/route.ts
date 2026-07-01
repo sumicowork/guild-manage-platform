@@ -50,19 +50,35 @@ export async function GET(
       likeCount: camel.preferCount ?? 0,
       createdAt: camel.createTime ?? camel.createdAt,
       channelId: '',
-      comments: (camel.comments || []).map((c: any) => ({
-        ...c,
-        content: c.contentText || '',
-        likeCount: c.likeCount ?? 0,
-        createdAt: c.createTime ?? c.createdAt,
-        replies: (c.replies || []).map((r: any) => ({
-          ...r,
-          content: r.contentText || '',
-          likeCount: r.likeCount ?? 0,
-          createdAt: r.createTime ?? r.createdAt,
-          targetReplyId: r.targetReplyId ?? null,
-        })),
-      })),
+      comments: (camel.comments || []).map((c: any) => {
+        const rawContent = c.content; // raw JSON { text, images, ... }
+        const contentImages: string[] =
+          rawContent && typeof rawContent === 'object' && Array.isArray(rawContent.images)
+            ? rawContent.images
+            : [];
+        return {
+          ...c,
+          content: c.contentText || '',
+          contentImages,
+          likeCount: c.likeCount ?? 0,
+          createdAt: c.createTime ?? c.createdAt,
+          replies: (c.replies || []).map((r: any) => {
+            const rawReply = r.content;
+            const replyImages: string[] =
+              rawReply && typeof rawReply === 'object' && Array.isArray(rawReply.images)
+                ? rawReply.images
+                : [];
+            return {
+              ...r,
+              content: r.contentText || '',
+              contentImages: replyImages,
+              likeCount: r.likeCount ?? 0,
+              createdAt: r.createTime ?? r.createdAt,
+              targetReplyId: r.targetReplyId ?? null,
+            };
+          }),
+        };
+      }),
     };
 
     return success(mapped);
