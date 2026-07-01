@@ -19,7 +19,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
@@ -302,7 +301,7 @@ export default function AutoRulePanel() {
                 onValueChange={(v) => setFormAction(v as 'delete' | 'move')}
               >
                 <SelectTrigger>
-                  <SelectValue />
+                  <span className="text-sm">{{ delete: '删除帖子', move: '移帖' }[formAction]}</span>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="delete">删除帖子</SelectItem>
@@ -316,7 +315,7 @@ export default function AutoRulePanel() {
                 {channels.length > 0 ? (
                   <Select value={formChannelId} onValueChange={(v) => setFormChannelId(v ?? '')}>
                     <SelectTrigger>
-                      <SelectValue placeholder="选择目标版块..." />
+                      <span className="text-sm">{channelNameMap.get(formChannelId) || '选择目标版块...'}</span>
                     </SelectTrigger>
                     <SelectContent>
                       {channels.map((ch) => (
