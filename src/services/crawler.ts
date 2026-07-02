@@ -584,6 +584,23 @@ export async function runUpdateCrawl(
     log(taskId, `Loaded ${autoRules.length} enabled auto-rule(s): ${autoRules.map(r => r.name).join(', ')}`);
   }
 
+  // Build channel_name → channel_id map for resolving batch-fetched feeds
+  // (getGuildFeeds only returns channel_name, not channel_id)
+  let channelNameToId: Map<string, string> = new Map();
+  if (autoRules.length > 0) {
+    const channels = await prisma.feed.findMany({
+      where: { channel_id: { not: null }, channel_name: { not: null } },
+      select: { channel_id: true, channel_name: true },
+      distinct: ['channel_name'],
+    });
+    for (const ch of channels) {
+      if (ch.channel_id && ch.channel_name) {
+        channelNameToId.set(ch.channel_name, ch.channel_id);
+      }
+    }
+    log(taskId, `Channel map: ${channelNameToId.size} entries`);
+  }
+
   try {
     // ── Phase 1: Scan feeds for changes ──
     log(taskId, "Phase 1: Scanning feeds for changes...");
@@ -639,7 +656,9 @@ export async function runUpdateCrawl(
                 (r) => r.target_author_id === feed.author_id
               );
               if (matchedRule) {
-                const feedChannelId = feed.channel_id ? String(feed.channel_id) : "";
+                const feedChannelId = feed.channel_id
+                  ? String(feed.channel_id)
+                  : channelNameToId.get(feed.channel_name) || "";
                 const feedCreateTime = feed.create_time_raw ? String(feed.create_time_raw) : "";
 
                 try {
