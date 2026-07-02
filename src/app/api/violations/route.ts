@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, forbidden, success, error, serializeBigInt, toCamelCase, parsePage, parsePageSize } from "@/lib/api-utils";
 import type { Prisma } from "@/generated/prisma/client";
 import { movePost, deletePost, deleteComment, deleteReply, postComment } from "@/lib/cli/feed";
-import { muteUser, kickUser, sendDM, addRoleMembers } from "@/lib/cli/member";
+import { muteUser, kickUser, sendDM } from "@/lib/cli/member";
 
 const GUILD_ID = process.env.GUILD_ID || "82203161765285899";
 
@@ -156,7 +156,6 @@ export async function POST(req: NextRequest) {
       targetFeedId,
       notificationText,
       adminIdentityId,
-      roleGroupId,
     } = body;
 
     // Resolve violation reason: accept either reason name (violationReason) or reasonId
@@ -452,19 +451,6 @@ export async function POST(req: NextRequest) {
       });
 
       cliResults.push(notificationSent ? "通知发送成功" : "通知发送失败");
-    }
-
-    // Optional: assign user to role group
-    if (roleGroupId && resolvedTargetAuthorId) {
-      try {
-        const ok = await addRoleMembers(GUILD_ID, roleGroupId, [resolvedTargetAuthorId], adminIdentityId);
-        cliResults.push(ok ? "身份组分配成功" : "身份组分配失败");
-        if (!ok) {
-          cliErrors.push("身份组分配失败");
-        }
-      } catch (e) {
-        cliErrors.push(`身份组分配异常: ${e instanceof Error ? e.message : String(e)}`);
-      }
     }
 
     // Re-fetch the updated violation with notification status

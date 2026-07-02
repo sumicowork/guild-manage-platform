@@ -41,11 +41,6 @@ interface Channel {
   name: string;
 }
 
-interface RoleGroup {
-  id: string;
-  name: string;
-}
-
 interface ViolationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -83,8 +78,6 @@ export function ViolationDialog({
   const [loading, setLoading] = useState(false);
   const [identities, setIdentities] = useState<AdminIdentity[]>([]);
   const [adminIdentityId, setAdminIdentityId] = useState<string>('');
-  const [roleGroups, setRoleGroups] = useState<RoleGroup[]>([]);
-  const [roleGroupId, setRoleGroupId] = useState<string>('');
 
   useEffect(() => {
     if (open) {
@@ -110,14 +103,6 @@ export function ViolationDialog({
       setReasons(reasonsData);
       setChannels(channelsData);
       setIdentities(identitiesData);
-
-      // Load role groups (non-critical)
-      try {
-        const roleGroupsData = await api.get<RoleGroup[]>('/role-groups');
-        setRoleGroups(roleGroupsData);
-      } catch {
-        setRoleGroups([]);
-      }
       // 默认选中第一个身份
       if (identitiesData.length > 0 && !adminIdentityId) {
         setAdminIdentityId(String(identitiesData[0].id));
@@ -159,7 +144,6 @@ export function ViolationDialog({
         targetAuthorId,
         targetFeedId: targetFeedId || (targetType === 'feed' ? targetId : undefined),
         adminIdentityId: adminIdentityId ? Number(adminIdentityId) : undefined,
-        roleGroupId: roleGroupId || undefined,
       });
       toast.success('违规处置已提交');
       onOpenChange(false);
@@ -182,7 +166,6 @@ export function ViolationDialog({
     setNotifyEnabled(true);
     setNotifyType('reply');
     setNotifyContent('');
-    setRoleGroupId('');
   };
 
   const actionOptions =
@@ -406,31 +389,6 @@ export function ViolationDialog({
               </>
             )}
 
-            {/* Role Group (optional) */}
-            <div className="space-y-2">
-              <Label>划归身份组（可选）</Label>
-              {roleGroups.length > 0 ? (
-                <Select value={roleGroupId} onValueChange={(v) => setRoleGroupId(v ?? '')}>
-                  <SelectTrigger className="w-full">
-                    <span className="text-sm">{roleGroupId ? (roleGroups.find(r => r.id === roleGroupId)?.name || '不限') : '不限'}</span>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">不限</SelectItem>
-                    {roleGroups.map((rg) => (
-                      <SelectItem key={rg.id} value={rg.id}>
-                        {rg.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input
-                  value={roleGroupId}
-                  onChange={(e) => setRoleGroupId(e.target.value)}
-                  placeholder="输入身份组 ID（暂时无法加载列表）"
-                />
-              )}
-            </div>
           </div>
         )}
 
