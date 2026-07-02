@@ -40,6 +40,14 @@ export async function POST(req: NextRequest) {
       return error("用户名或密码错误", 401);
     }
 
+    // Reject pending (not yet approved) users
+    if (user.status === "pending") {
+      return error("您的账户尚未通过审批，请等待管理员审核", 403);
+    }
+    if (user.status === "disabled") {
+      return error("您的账户已被禁用", 403);
+    }
+
     // Revoke any prior refresh tokens for this user (single-session sign-in)
     await revokeAllUserRefreshTokens(user.id);
 

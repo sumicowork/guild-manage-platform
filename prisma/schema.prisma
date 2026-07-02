@@ -204,6 +204,7 @@ model PlatformUser {
   password     String
   display_name String?
   role         String   @default("operator")
+  status       String   @default("active") // active | pending | disabled
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
 

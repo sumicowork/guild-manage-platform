@@ -24,7 +24,14 @@ interface PlatformUser {
   id: number;
   username: string;
   role: string;
+  status?: string;
   createdAt: string;
+}
+
+interface PendingUser {
+  id: number;
+  username: string;
+  created_at: string;
 }
 
 interface AdminIdentity {
@@ -74,6 +81,10 @@ export default function SettingsPage() {
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Pending approvals
+  const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
+  const [pendingLoading, setPendingLoading] = useState(false);
 
   // Admin identities
   const [identities, setIdentities] = useState<AdminIdentity[]>([]);
@@ -141,12 +152,25 @@ export default function SettingsPage() {
     }
   }, []);
 
+  const fetchPendingUsers = useCallback(async () => {
+    setPendingLoading(true);
+    try {
+      const data = await api.get<PendingUser[]>('/auth/register/pending');
+      setPendingUsers(data);
+    } catch {
+      // ignore
+    } finally {
+      setPendingLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchUsers();
     fetchIdentities();
     fetchCliStatus();
     fetchIdentityStatus();
-  }, [fetchUsers, fetchIdentities, fetchCliStatus, fetchIdentityStatus]);
+    fetchPendingUsers();
+  }, [fetchUsers, fetchIdentities, fetchCliStatus, fetchIdentityStatus, fetchPendingUsers]);
 
   const handleAddUser = async () => {
     if (!newUsername.trim() || !newPassword.trim()) {
@@ -176,6 +200,28 @@ export default function SettingsPage() {
       fetchUsers();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '删除失败');
+    }
+  };
+
+  const handleApprove = async (user: PendingUser) => {
+    try {
+      await api.post('/auth/register/approve', { userId: user.id });
+      toast.success(`已通过 "${user.username}" 的注册申请`);
+      fetchPendingUsers();
+      fetchUsers();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '审批失败');
+    }
+  };
+
+  const handleReject = async (user: PendingUser) => {
+    if (!confirm(`确定拒绝 "${user.username}" 的注册申请吗？`)) return;
+    try {
+      await api.post('/auth/register/reject', { userId: user.id });
+      toast.success(`已拒绝 "${user.username}" 的注册申请`);
+      fetchPendingUsers();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '拒绝失败');
     }
   };
 
@@ -307,6 +353,16 @@ export default function SettingsPage() {
                     <Badge variant="outline" className="text-xs">
                       {user.role}
                     </Badge>
+                    {user.status === 'pending' && (
+                      <Badge className="text-xs bg-amber-50 text-amber-600 border-amber-200">
+                        待审批
+                      </Badge>
+                    )}
+                    {user.status === 'disabled' && (
+                      <Badge className="text-xs bg-red-50 text-red-600 border-red-200">
+                        已禁用
+                      </Badge>
+                    )}
                     <span className="text-xs text-gray-400">
                       {new Date(user.createdAt).toLocaleDateString('zh-CN')}
                     </span>
@@ -324,6 +380,63 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Pending Approvals */}
+      {pendingUsers.length > 0 && (
+        <Card className="bg-white border-amber-200">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Users className="size-4 text-amber-500" />
+              <div>
+                <CardTitle className="text-sm">待审批注册</CardTitle>
+                <CardDescription>以下用户申请注册运营账号，等待审批</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <Separator className="bg-amber-100" />
+          <CardContent className="pt-4">
+            {pendingLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-10 rounded-lg bg-amber-50" />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {pendingUsers.map((u) => (
+                  <div
+                    key={u.id}
+                    className="flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2.5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-medium text-gray-900">{u.username}</span>
+                      <span className="text-xs text-gray-400">
+                        {new Date(u.created_at).toLocaleDateString('zh-CN')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-xs text-green-600 border-green-200 hover:bg-green-50"
+                        onClick={() => handleApprove(u)}
+                      >
+                        通过
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-xs text-red-500 border-red-200 hover:bg-red-50"
+                        onClick={() => handleReject(u)}
+                      >
+                        拒绝
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Admin Identities */}
       <Card className="bg-white border-gray-200">

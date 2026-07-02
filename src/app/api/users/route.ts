@@ -27,6 +27,7 @@ export async function GET(req: NextRequest) {
         username: true,
         display_name: true,
         role: true,
+        status: true,
         created_at: true,
         updated_at: true,
       },
@@ -78,6 +79,7 @@ export async function POST(req: NextRequest) {
         username: true,
         display_name: true,
         role: true,
+        status: true,
         created_at: true,
       },
     });
