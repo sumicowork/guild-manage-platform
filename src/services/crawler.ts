@@ -620,7 +620,7 @@ export async function runUpdateCrawl(
       const pageFeedIds = page.feeds.map((f: any) => f.feed_id);
       const existingFeeds = await prisma.feed.findMany({
         where: { feed_id: { in: pageFeedIds } },
-        select: { feed_id: true, comment_count: true, status: true },
+        select: { feed_id: true, comment_count: true, status: true, channel_name: true, title: true, images: true },
       });
       const existingMap = new Map(existingFeeds.map((f) => [f.feed_id, f]));
 
@@ -700,19 +700,62 @@ export async function runUpdateCrawl(
             stats.updatedFeeds++;
             changedFeedIds.push(feed.feed_id);
             pageHasChanges = true;
-          } else if (
-            feed.comment_count !== undefined &&
-            feed.comment_count !== null &&
-            existing.comment_count !== Number(feed.comment_count)
-          ) {
-            // Comment count changed — use direct update to guarantee persistence
-            await prisma.feed.update({
-              where: { feed_id: feed.feed_id },
-              data: { comment_count: Number(feed.comment_count) },
-            });
-            stats.updatedFeeds++;
-            changedFeedIds.push(feed.feed_id);
-            pageHasChanges = true;
+          } else {
+            // ── Change detection: comment_count, channel_name, title, images ──
+            let hasChanges = false;
+            const updateData: Record<string, any> = {};
+
+            // Comment count
+            if (
+              feed.comment_count !== undefined &&
+              feed.comment_count !== null &&
+              existing.comment_count !== Number(feed.comment_count)
+            ) {
+              updateData.comment_count = Number(feed.comment_count);
+              hasChanges = true;
+            }
+
+            // Channel name
+            if (
+              feed.channel_name !== undefined &&
+              feed.channel_name !== null &&
+              existing.channel_name !== feed.channel_name
+            ) {
+              updateData.channel_name = feed.channel_name;
+              hasChanges = true;
+            }
+
+            // Title
+            if (
+              feed.title !== undefined &&
+              feed.title !== null &&
+              existing.title !== feed.title
+            ) {
+              updateData.title = feed.title;
+              hasChanges = true;
+            }
+
+            // Images (compare as JSON arrays)
+            const feedImages = Array.isArray(feed.images) ? feed.images : null;
+            const existingImages = existing.images; // Json value
+            const imagesEqual =
+              feedImages === null && existingImages === null ? true
+              : feedImages === null || existingImages === null ? false
+              : JSON.stringify(feedImages) === JSON.stringify(existingImages);
+            if (!imagesEqual) {
+              updateData.images = feedImages;
+              hasChanges = true;
+            }
+
+            if (hasChanges) {
+              await prisma.feed.update({
+                where: { feed_id: feed.feed_id },
+                data: updateData,
+              });
+              stats.updatedFeeds++;
+              changedFeedIds.push(feed.feed_id);
+              pageHasChanges = true;
+            }
           }
           // If feed.comment_count is undefined/null, skip the comparison entirely.
           // Otherwise missing fields would cause a perpetual false-positive loop:
