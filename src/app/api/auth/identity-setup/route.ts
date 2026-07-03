@@ -5,7 +5,7 @@ import fs from "fs";
 import path from "path";
 import { getAuthUser, unauthorized, success, error } from "@/lib/api-utils";
 import { prisma } from "@/lib/db";
-import { switchToIdentity, buildCliEnv } from "@/lib/cli/credentials";
+import { switchToIdentity, buildCliEnv, saveCurrentTokenToIdentity } from "@/lib/cli/credentials";
 
 const execFileAsync = promisify(execFile);
 
@@ -105,7 +105,10 @@ export async function GET(req: NextRequest) {
       return error(result?.error?.message || "扫码授权未完成", 400);
     }
 
-    // Save token to identity
+    // Save token to identity (handles encryption, correct key name, etc.)
+    await saveCurrentTokenToIdentity(identity.id);
+
+    // Update token expiration
     const credFile = path.join(
       process.cwd(),
       "credentials",
@@ -114,17 +117,11 @@ export async function GET(req: NextRequest) {
     );
     if (fs.existsSync(credFile)) {
       const content = fs.readFileSync(credFile, "utf-8");
-      const tokenMatch = content.match(/GCLOUD_ACCESS_TOKEN=(.+)/);
-      const expiresMatch = content.match(/GCLOUD_TOKEN_EXPIRES_AT=(\d+)/);
-      if (tokenMatch) {
+      const expiresMatch = content.match(/QQ_AI_TOKEN_EXPIRES_AT=(\d+)/);
+      if (expiresMatch) {
         await prisma.adminIdentity.update({
           where: { id: identity.id },
-          data: {
-            token: tokenMatch[1],
-            token_expires: expiresMatch
-              ? new Date(Number(expiresMatch[1]) * 1000)
-              : undefined,
-          },
+          data: { token_expires: new Date(Number(expiresMatch[1]) * 1000) },
         });
       }
     }
