@@ -26,10 +26,13 @@ export async function GET(req: NextRequest) {
     if (user.role !== "admin") {
       const identity = await prisma.adminIdentity.findFirst({
         where: { nickname: user.username },
-        select: { id: true, token: true, token_expires: true },
+        select: { id: true, token: true, token_expires: true, status: true },
       });
       if (!identity || !identity.token) {
         identityStatus = "needs_login";
+      } else if (identity.status !== "active") {
+        // DB status periodically synced by identity health check cron
+        identityStatus = "expired";
       } else if (
         identity.token_expires &&
         identity.token_expires < new Date()

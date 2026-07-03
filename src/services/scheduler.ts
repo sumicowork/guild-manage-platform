@@ -6,6 +6,7 @@ import {
   runMemberCrawl,
   CrawlCancelledError,
 } from "@/services/crawler";
+import { runIdentityHealthCheck } from "@/services/identity-health";
 import fs from "fs";
 import path from "path";
 
@@ -44,6 +45,7 @@ function writePersistedCron(update?: string, member?: string): void {
 const persisted = readPersistedCron();
 let updateTask: ScheduledTask | null = null;
 let memberTask: ScheduledTask | null = null;
+let identityCheckTask: ScheduledTask | null = null;
 let currentUpdateCron = process.env.CRAWL_CRON || persisted.update || DEFAULT_CRON;
 let currentMemberCron = process.env.MEMBER_CRON || persisted.member || MEMBER_CRON;
 
@@ -237,6 +239,16 @@ export async function initScheduler(): Promise<void> {
   } else {
     console.warn(`[Scheduler] Invalid member cron expression: ${currentMemberCron}`);
   }
+
+  // Schedule identity health check — every 30 minutes
+  identityCheckTask = cron.schedule("*/30 * * * *", async () => {
+    try {
+      await runIdentityHealthCheck();
+    } catch (err) {
+      console.error("[Scheduler] Identity health check failed:", err);
+    }
+  });
+  console.log("[Scheduler] Identity health check scheduled: every 30 minutes");
 }
 
 /**
@@ -250,6 +262,10 @@ export function destroyScheduler(): void {
   if (memberTask) {
     memberTask.stop();
     memberTask = null;
+  }
+  if (identityCheckTask) {
+    identityCheckTask.stop();
+    identityCheckTask = null;
   }
   console.log("[Scheduler] All scheduled tasks stopped");
 }
