@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api-client';
+import { useAuth } from '@/lib/auth-context';
 import { DataTable, Column } from '@/components/DataTable';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -53,6 +54,7 @@ const targetTypeLabels: Record<string, string> = {
 };
 
 export default function ViolationsPage() {
+  const { user } = useAuth();
   const [violations, setViolations] = useState<Violation[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -199,7 +201,11 @@ export default function ViolationsPage() {
         <span className="text-xs text-gray-500">{v.identityName || '-'}</span>
       ),
     },
-    {
+  ];
+
+  // Admin-only: delete button
+  if (user?.role === 'admin') {
+    columns.push({
       key: 'id' as const,
       header: '',
       width: '50px',
@@ -214,8 +220,8 @@ export default function ViolationsPage() {
           <Trash2 className="size-3.5" />
         </Button>
       ),
-    },
-  ];
+    });
+  }
 
   return (
     <div className="space-y-4">
