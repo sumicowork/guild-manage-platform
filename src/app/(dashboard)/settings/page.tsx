@@ -382,26 +382,27 @@ export default function SettingsPage() {
       </Card>
 
       {/* Pending Approvals */}
-      {pendingUsers.length > 0 && (
-        <Card className="bg-white border-amber-200">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Users className="size-4 text-amber-500" />
-              <div>
-                <CardTitle className="text-sm">待审批注册</CardTitle>
-                <CardDescription>以下用户申请注册运营账号，等待审批</CardDescription>
-              </div>
+      <Card className="bg-white border-gray-200">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Users className="size-4 text-gray-500" />
+            <div>
+              <CardTitle className="text-sm">待审批注册</CardTitle>
+              <CardDescription>审核用户注册申请</CardDescription>
             </div>
-          </CardHeader>
-          <Separator className="bg-amber-100" />
-          <CardContent className="pt-4">
-            {pendingLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-10 rounded-lg bg-amber-50" />
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {pendingUsers.map((u) => (
+          </div>
+        </CardHeader>
+        <Separator className="bg-gray-200" />
+        <CardContent className="pt-4">
+          {pendingLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-10 rounded-lg bg-gray-200" />
+            </div>
+          ) : pendingUsers.length === 0 ? (
+            <p className="text-sm text-gray-400">暂无待审批的注册申请</p>
+          ) : (
+            <div className="space-y-2">
+              {pendingUsers.map((u) => (
                   <div
                     key={u.id}
                     className="flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2.5"
@@ -436,7 +437,6 @@ export default function SettingsPage() {
             )}
           </CardContent>
         </Card>
-      )}
 
       {/* Admin Identities */}
       <Card className="bg-white border-gray-200">
