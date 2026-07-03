@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
@@ -12,7 +11,6 @@ import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
-  const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -31,7 +29,8 @@ export default function LoginPage() {
       });
       // Token is set via httpOnly cookie by the server — nothing to store client-side
       toast.success(`欢迎，${data.user.username}`);
-      router.push('/');
+      // Full reload to re-mount AuthProvider with fresh cookies
+      window.location.href = '/';
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '登录失败');
     } finally {
