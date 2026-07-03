@@ -874,6 +874,35 @@ export async function runUpdateCrawl(
       log(taskId, `Phase 2 complete: ${stats.commentsAdded} comments added`);
     }
 
+    // ── Phase 2.5: Fetch details for feeds missing content ──
+    {
+      const detailFeedIds = await prisma.feed.findMany({
+        where: { feed_id: { in: changedFeedIds }, content: null },
+        select: { feed_id: true },
+      });
+      if (detailFeedIds.length > 0) {
+        log(taskId, `Phase 2.5: Fetching details for ${detailFeedIds.length} feeds without content...`);
+        for (const f of detailFeedIds) {
+          checkAbort(signal, taskId);
+          try {
+            const detail = await getFeedDetail(f.feed_id, gid, adminIdentityId);
+            if (detail && detail.content) {
+              await prisma.feed.update({
+                where: { feed_id: f.feed_id },
+                data: {
+                  content: detail.content,
+                  share_url: detail.share_url || undefined,
+                  feed_type: detail.feed_type || undefined,
+                },
+              });
+            }
+          } catch (err) {
+            console.error(`[Crawl] Failed to fetch detail for ${f.feed_id}:`, err);
+          }
+        }
+      }
+    }
+
     // ── Phase 3: Deletion detection（仅限扫描范围内）──
     // 只检查 create_time_raw >= oldestSeenTime 的帖子，
     // 更老的帖子不在本次扫描范围，不做删除判断。
