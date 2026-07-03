@@ -22,7 +22,11 @@ export default function IdentitySetupPage() {
     setQrData(null);
     try {
       const data = await api.post<{ qrcodeBase64: string; message?: string }>('/auth/identity-setup');
-      setQrData(data.qrcodeBase64);
+      let qrSrc = data.qrcodeBase64;
+      if (qrSrc && !qrSrc.startsWith('data:')) {
+        qrSrc = `data:image/png;base64,${qrSrc}`;
+      }
+      setQrData(qrSrc);
       setMessage(data.message || '请使用 QQ 扫描二维码登录');
       // Start polling
       pollCompletion();
