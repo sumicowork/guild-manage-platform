@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api-client';
+import { useAuth } from '@/lib/auth-context';
 import {
   Dialog,
   DialogContent,
@@ -60,6 +61,7 @@ export function ViolationDialog({
   targetAuthorId,
   targetFeedId,
 }: ViolationDialogProps) {
+  const { user } = useAuth();
   const [reasons, setReasons] = useState<ViolationReason[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [selectedReasonId, setSelectedReasonId] = useState<string>('');
@@ -102,10 +104,18 @@ export function ViolationDialog({
       ]);
       setReasons(reasonsData);
       setChannels(channelsData);
-      setIdentities(identitiesData);
-      // 默认选中第一个身份
-      if (identitiesData.length > 0 && !adminIdentityId) {
-        setAdminIdentityId(String(identitiesData[0].id));
+
+      // Operator: only show own identity (matched by nickname === username)
+      let filteredIdentities = identitiesData;
+      if (user?.role !== 'admin') {
+        filteredIdentities = identitiesData.filter(
+          (id) => id.name === user?.username
+        );
+      }
+      setIdentities(filteredIdentities);
+      // Auto-select first (only) identity
+      if (filteredIdentities.length > 0 && !adminIdentityId) {
+        setAdminIdentityId(String(filteredIdentities[0].id));
       }
     } catch {
       toast.error('加载配置失败');
