@@ -28,8 +28,10 @@ export async function GET(req: NextRequest) {
     for (const f of feedsWithId) {
       if (f.channel_id) {
         const name = f.channel_name ?? f.channel_id;
-        channels.push({ id: f.channel_id, name });
-        seenNames.add(name);
+        if (!seenNames.has(name)) {
+          channels.push({ id: f.channel_id, name });
+          seenNames.add(name);
+        }
       }
     }
 
