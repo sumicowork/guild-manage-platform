@@ -108,23 +108,11 @@ export async function GET(req: NextRequest) {
     // Save token to identity (handles encryption, correct key name, etc.)
     await saveCurrentTokenToIdentity(identity.id);
 
-    // Update token expiration
-    const credFile = path.join(
-      process.cwd(),
-      "credentials",
-      `identity_${identity.id}`,
-      ".env"
-    );
-    if (fs.existsSync(credFile)) {
-      const content = fs.readFileSync(credFile, "utf-8");
-      const expiresMatch = content.match(/QQ_AI_TOKEN_EXPIRES_AT=(\d+)/);
-      if (expiresMatch) {
-        await prisma.adminIdentity.update({
-          where: { id: identity.id },
-          data: { token_expires: new Date(Number(expiresMatch[1]) * 1000) },
-        });
-      }
-    }
+    // Reset status to active in case it was marked expired
+    await prisma.adminIdentity.update({
+      where: { id: identity.id },
+      data: { status: "active", token_expires: null },
+    });
 
     return success({ message: "身份设置成功" });
   } catch (err: unknown) {
