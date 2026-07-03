@@ -297,6 +297,8 @@ export async function POST(req: NextRequest) {
         notification_type: notification?.type || null,
         notification_text: notification?.content || notificationText || notification?.text || null,
         operator_user_id: BigInt(auth.userId),
+        operator_admin_id: adminIdentityId ? String(adminIdentityId) : null,
+        operator_admin_name: null as string | null, // set below
       },
       include: {
         feed: { select: { feed_id: true, title: true } },
@@ -307,6 +309,22 @@ export async function POST(req: NextRequest) {
         },
       },
     });
+
+    // Look up admin identity name and update violation record
+    let adminIdentityName: string | null = null;
+    if (adminIdentityId) {
+      const identity = await prisma.adminIdentity.findUnique({
+        where: { id: BigInt(adminIdentityId) },
+        select: { nickname: true },
+      });
+      if (identity) {
+        adminIdentityName = identity.nickname;
+        await prisma.violation.update({
+          where: { id: violation.id },
+          data: { operator_admin_name: identity.nickname },
+        });
+      }
+    }
 
     // ─── Execute CLI actions (move/delete/mute) ───────────────────────
     const cliResults: string[] = [];
