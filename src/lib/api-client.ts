@@ -39,7 +39,7 @@ class ApiClient {
         return this.parseResponse<T>(retryRes, path);
       }
       // Refresh failed — go to login
-      if (typeof window !== 'undefined' && path !== '/auth/login' && path !== '/auth/refresh') {
+      if (typeof window !== 'undefined' && path !== '/auth/login' && path !== '/auth/refresh' && path !== '/auth/session') {
         window.location.href = '/login';
       }
       throw new Error('Unauthorized');
