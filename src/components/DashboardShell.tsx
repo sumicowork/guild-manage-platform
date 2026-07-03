@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { api } from '@/lib/api-client';
@@ -38,7 +38,14 @@ function DashboardShellInner({ children }: DashboardShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user } = useAuth();
+  const { user, identityStatus, loading } = useAuth();
+
+  // Block platform access until identity is set up
+  useEffect(() => {
+    if (!loading && identityStatus && identityStatus !== 'ready') {
+      router.replace('/identity-setup');
+    }
+  }, [loading, identityStatus, router]);
 
   const handleLogout = async () => {
     try {

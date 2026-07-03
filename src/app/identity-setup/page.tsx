@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api-client';
+import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { toast } from 'sonner';
@@ -10,6 +11,7 @@ import { Loader2, QrCode } from 'lucide-react';
 
 export default function IdentitySetupPage() {
   const router = useRouter();
+  const { refresh } = useAuth();
   const [qrData, setQrData] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [polling, setPolling] = useState(false);
@@ -36,7 +38,8 @@ export default function IdentitySetupPage() {
     try {
       await api.get('/auth/identity-setup');
       toast.success('身份设置成功');
-      router.push('/');
+      await refresh(); // update auth context
+      router.replace('/');
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
       if (msg.includes('超时')) {
