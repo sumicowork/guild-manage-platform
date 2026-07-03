@@ -95,14 +95,18 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   const hasToken = useCallback(async () => {
-    // Post-cookie-auth: probe /auth/session; if it returns ok we're logged in
     try {
-      await api.get('/auth/session');
+      const data = await api.get<{ identityStatus: string }>('/auth/session');
+      // Check if identity needs setup
+      if (data.identityStatus !== 'ready') {
+        router.replace('/identity-setup');
+        return false;
+      }
       return true;
     } catch {
       return false;
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     let cancelled = false;

@@ -21,6 +21,23 @@ export async function GET(req: NextRequest) {
       return error("用户不存在", 404);
     }
 
+    // Check identity status
+    let identityStatus = "ready";
+    const identity = await prisma.adminIdentity.findFirst({
+      where: { nickname: user.username },
+      select: { id: true, token: true, token_expires: true, status: true },
+    });
+    if (!identity || !identity.token) {
+      identityStatus = "needs_login";
+    } else if (
+      identity.token_expires &&
+      identity.token_expires < new Date()
+    ) {
+      identityStatus = "expired";
+    } else if (identity.status !== "active") {
+      identityStatus = "disabled";
+    }
+
     return success({
       user: serializeBigInt({
         id: user.id,
@@ -28,6 +45,7 @@ export async function GET(req: NextRequest) {
         displayName: user.display_name,
         role: user.role,
       }),
+      identityStatus,
     });
   } catch (err) {
     console.error("Session error:", err);

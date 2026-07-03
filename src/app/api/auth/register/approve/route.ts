@@ -22,6 +22,20 @@ export async function POST(req: NextRequest) {
       data: { status: "active" },
     });
 
+    // Auto-create an admin identity for this user (token initially empty)
+    const identity = await prisma.adminIdentity.findFirst({
+      where: { nickname: user.username },
+    });
+    if (!identity) {
+      await prisma.adminIdentity.create({
+        data: {
+          nickname: user.username,
+          token: "",
+          status: "active",
+        },
+      });
+    }
+
     return success(null, { message: `用户 "${user.username}" 已审批通过` });
   } catch (err) {
     console.error("Approve error:", err);
