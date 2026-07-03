@@ -47,6 +47,7 @@ export async function GET(
     // Map fields to match client Feed interface
     const mapped = {
       ...camel,
+      content: camel.content || camel.contentSnippet || '',
       likeCount: camel.preferCount ?? 0,
       createdAt: camel.createTime ?? camel.createdAt,
       channelId: '',
