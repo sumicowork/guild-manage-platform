@@ -158,7 +158,7 @@ export default function SettingsPage() {
       const data = await api.get<PendingUser[]>('/auth/register/pending');
       setPendingUsers(data);
     } catch {
-      // ignore
+      console.error("Failed to fetch pending users");
     } finally {
       setPendingLoading(false);
     }

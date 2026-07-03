@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, forbidden, success, error } from "@/lib/api-utils";
+import { getAuthUser, unauthorized, forbidden, success, error, serializeBigInt } from "@/lib/api-utils";
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
       orderBy: { created_at: "asc" },
     });
 
-    return success(users);
+    return success(serializeBigInt(users));
   } catch (err) {
     console.error("Pending applications error:", err);
     return error("获取待审批列表失败", 500);
