@@ -9,7 +9,6 @@ export async function PUT(
   try {
     const auth = await getAuthUser(req);
     if (!auth) return unauthorized();
-    if (auth.role !== "admin") return forbidden();
 
     const { id } = await ctx.params;
     let reasonId: bigint;
@@ -66,7 +65,6 @@ export async function DELETE(
   try {
     const auth = await getAuthUser(req);
     if (!auth) return unauthorized();
-    if (auth.role !== "admin") return forbidden();
 
     const { id } = await ctx.params;
     let reasonId: bigint;

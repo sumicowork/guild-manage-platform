@@ -27,7 +27,6 @@ export async function POST(req: NextRequest) {
   try {
     const auth = await getAuthUser(req);
     if (!auth) return unauthorized();
-    if (auth.role !== "admin") return forbidden();
 
     const body = await req.json();
     const { name, notificationTemplate } = body;

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { api } from '@/lib/api-client';
+import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Separator } from '@/components/ui/separator';
@@ -25,8 +26,8 @@ const navItems = [
   { href: '/members', label: '成员管理', icon: Users },
   { href: '/violations', label: '违规记录', icon: AlertTriangle },
   { href: '/violations/config', label: '违规配置', icon: Sliders },
-  { href: '/crawl', label: '爬取管理', icon: RefreshCw },
-  { href: '/settings', label: '系统设置', icon: Settings },
+  { href: '/crawl', label: '爬取管理', icon: RefreshCw, adminOnly: true },
+  { href: '/settings', label: '系统设置', icon: Settings, adminOnly: true },
 ];
 
 interface DashboardShellProps {
@@ -37,6 +38,7 @@ function DashboardShellInner({ children }: DashboardShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { user } = useAuth();
 
   const handleLogout = async () => {
     try {
@@ -59,7 +61,9 @@ function DashboardShellInner({ children }: DashboardShellProps) {
       </div>
       <Separator className="bg-gray-200" />
       <nav className="flex-1 space-y-0.5 px-2 py-3">
-        {navItems.map((item) => {
+        {navItems
+          .filter(item => !item.adminOnly || user?.role === 'admin')
+          .map((item) => {
           const Icon = item.icon;
           const active = isActive(item.href);
           return (

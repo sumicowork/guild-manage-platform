@@ -136,7 +136,6 @@ export async function POST(req: NextRequest) {
   try {
     const auth = await getAuthUser(req);
     if (!auth) return unauthorized();
-    if (auth.role !== "admin") return forbidden();
 
     // Idempotency: check for duplicate violation in the last 5 minutes
     const body = await req.json();
