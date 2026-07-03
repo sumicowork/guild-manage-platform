@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
     if (user.role !== "admin") {
       const identity = await prisma.adminIdentity.findFirst({
         where: { nickname: user.username },
-        select: { id: true, token: true, token_expires: true, status: true },
+        select: { id: true, token: true, token_expires: true },
       });
       if (!identity || !identity.token) {
         identityStatus = "needs_login";
@@ -35,8 +35,6 @@ export async function GET(req: NextRequest) {
         identity.token_expires < new Date()
       ) {
         identityStatus = "expired";
-      } else if (identity.status !== "active") {
-        identityStatus = "disabled";
       }
     }
 
