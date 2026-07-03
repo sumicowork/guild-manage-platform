@@ -8,6 +8,7 @@ export async function GET(req: NextRequest) {
     if (!auth) return unauthorized();
 
     // Get channels: prefer numeric channel_id, fallback to name-based
+    // For channels with a real name, use name as id so filter catches all same-name feeds
     const feedsWithId = await prisma.feed.findMany({
       where: { channel_id: { not: null } },
       select: { channel_id: true, channel_name: true },
@@ -29,7 +30,8 @@ export async function GET(req: NextRequest) {
       if (f.channel_id) {
         const name = f.channel_name ?? f.channel_id;
         if (!seenNames.has(name)) {
-          channels.push({ id: f.channel_id, name });
+          // Use channel_name as id when available — feed API OR-clause matches both
+          channels.push({ id: f.channel_name ?? f.channel_id, name });
           seenNames.add(name);
         }
       }
