@@ -109,12 +109,6 @@ export async function GET(req: NextRequest) {
     // Save token to identity (handles encryption, correct key name, etc.)
     await saveCurrentTokenToIdentity(identity.id);
 
-    // Reset status to active in case it was marked expired
-    await prisma.adminIdentity.update({
-      where: { id: identity.id },
-      data: { status: "active", token_expires: null },
-    });
-
     // Clear cached identity check so session re-validates immediately
     clearIdentityCache(auth.username);
 

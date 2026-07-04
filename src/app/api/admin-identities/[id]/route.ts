@@ -22,7 +22,7 @@ export async function PUT(
     }
 
     const body = await req.json();
-    const { nickname, token, status } = body;
+    const { nickname, token } = body;
 
     const existing = await prisma.adminIdentity.findUnique({
       where: { id: identityId },
@@ -33,7 +33,6 @@ export async function PUT(
 
     const updateData: Record<string, unknown> = {};
     if (nickname !== undefined) updateData.nickname = nickname;
-    if (status !== undefined) updateData.status = status;
     if (token !== undefined) updateData.token = encrypt(token);
 
     const updated = await prisma.adminIdentity.update({
@@ -41,7 +40,7 @@ export async function PUT(
       data: updateData,
     });
 
-    // Invalidate cache so identity pool reflects updated status/token
+    // Invalidate cache so identity pool reflects updated token
     invalidateIdentityPool();
 
     // Mask the token in response

@@ -31,7 +31,6 @@ export async function POST(req: NextRequest) {
         data: {
           nickname: user.username,
           token: "",
-          status: "active",
         },
       });
     }

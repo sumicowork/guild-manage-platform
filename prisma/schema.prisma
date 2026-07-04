@@ -236,11 +236,9 @@ model AdminIdentity {
   nickname      String
   token         String
   token_expires DateTime?
-  status        String    @default("active")
   created_at    DateTime  @default(now())
   updated_at    DateTime  @updatedAt
 
-  @@index([status])
   @@map("admin_identities")
 }
 

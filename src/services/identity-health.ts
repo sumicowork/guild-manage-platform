@@ -51,13 +51,8 @@ export async function runIdentityHealthCheck(): Promise<void> {
         child.on("error", () => resolve(false));
       });
 
-      const newStatus = result ? "active" : "expired";
-      await prisma.adminIdentity.update({
-        where: { id: identity.id },
-        data: { status: newStatus },
-      });
       console.log(
-        `[IdentityHealth] ${identity.nickname}: ${result ? "valid" : "expired"} → status=${newStatus}`
+        `[IdentityHealth] ${identity.nickname}: ${result ? "valid" : "expired"}`
       );
       updated++;
     } catch (err) {
