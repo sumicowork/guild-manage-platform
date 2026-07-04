@@ -85,6 +85,7 @@ interface MemberDetailDialogProps {
   tinyid: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onFeedClick?: (feedId: string) => void;
 }
 
 const roleLabels: Record<string, string> = {
@@ -109,7 +110,7 @@ const tabs: { key: Tab; label: string }[] = [
   { key: 'violations', label: '违规' },
 ];
 
-export function MemberDetailDialog({ tinyid, open, onOpenChange }: MemberDetailDialogProps) {
+export function MemberDetailDialog({ tinyid, open, onOpenChange, onFeedClick }: MemberDetailDialogProps) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<MemberHistoryData | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('feeds');
@@ -199,7 +200,11 @@ export function MemberDetailDialog({ tinyid, open, onOpenChange }: MemberDetailD
                   data.feeds.length > 0 ? (
                     <div className="space-y-2">
                       {data.feeds.map((feed) => (
-                        <div key={feed.id} className="rounded-lg bg-gray-50 px-3 py-2.5 ring-1 ring-gray-100">
+                        <div
+                          key={feed.id}
+                          className="rounded-lg bg-gray-50 px-3 py-2.5 ring-1 ring-gray-100 cursor-pointer hover:bg-gray-100 transition-colors"
+                          onClick={() => onFeedClick?.(feed.feedId)}
+                        >
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-sm font-medium text-gray-900 truncate">{feed.title || '(无标题)'}</span>
                             <span className="text-[11px] text-gray-400 shrink-0">
@@ -234,7 +239,11 @@ export function MemberDetailDialog({ tinyid, open, onOpenChange }: MemberDetailD
                   data.comments.length > 0 ? (
                     <div className="space-y-2">
                       {data.comments.map((comment) => (
-                        <div key={comment.id} className="rounded-lg bg-gray-50 px-3 py-2.5 ring-1 ring-gray-100">
+                        <div
+                          key={comment.id}
+                          className="rounded-lg bg-gray-50 px-3 py-2.5 ring-1 ring-gray-100 cursor-pointer hover:bg-gray-100 transition-colors"
+                          onClick={() => onFeedClick?.(comment.feedId)}
+                        >
                           <p className="text-sm text-gray-700 line-clamp-2">{comment.content}</p>
                           <div className="mt-1.5 flex items-center gap-2 text-[11px] text-gray-400">
                             <span className="truncate">帖子: {comment.feedTitle || '(未知)'}</span>
@@ -257,7 +266,11 @@ export function MemberDetailDialog({ tinyid, open, onOpenChange }: MemberDetailD
                   data.replies.length > 0 ? (
                     <div className="space-y-2">
                       {data.replies.map((reply) => (
-                        <div key={reply.id} className="rounded-lg bg-gray-50 px-3 py-2.5 ring-1 ring-gray-100">
+                        <div
+                          key={reply.id}
+                          className="rounded-lg bg-gray-50 px-3 py-2.5 ring-1 ring-gray-100 cursor-pointer hover:bg-gray-100 transition-colors"
+                          onClick={() => onFeedClick?.(reply.feedId)}
+                        >
                           <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mb-1">
                             <CornerDownRight className="size-3 shrink-0" />
                             {reply.targetUser && (

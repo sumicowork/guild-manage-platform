@@ -177,11 +177,38 @@ export default function FeedsPage() {
     api.get<Channel[]>('/channels').then(setChannels).catch(() => {});
   }, []);
 
+  // Auto-open feed detail from URL param (navigated from member detail)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const feedId = params.get('feedId');
+    if (feedId) {
+      handleFeedNavigate(feedId);
+      // Clean up URL to avoid re-triggering on refresh
+      const url = new URL(window.location.href);
+      url.searchParams.delete('feedId');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Load full feed detail (with comments + replies) on card click
   const handleCardClick = async (feed: Feed) => {
     setDetailLoading(true);
     try {
       const detail = await api.get<Feed>(`/feeds/${feed.feedId}`);
+      setSelectedFeed(detail);
+      setDetailOpen(true);
+    } catch {
+      toast.error('获取帖子详情失败');
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const handleFeedNavigate = async (feedId: string) => {
+    setMemberOpen(false);
+    setDetailLoading(true);
+    try {
+      const detail = await api.get<Feed>(`/feeds/${feedId}`);
       setSelectedFeed(detail);
       setDetailOpen(true);
     } catch {
@@ -459,6 +486,7 @@ export default function FeedsPage() {
         tinyid={memberTinyid}
         open={memberOpen}
         onOpenChange={setMemberOpen}
+        onFeedClick={handleFeedNavigate}
       />
     </div>
   );

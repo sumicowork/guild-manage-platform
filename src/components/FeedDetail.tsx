@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -9,7 +10,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { ThumbsUp, MessageCircle, Clock, AlertTriangle, CornerDownRight } from 'lucide-react';
+import { ThumbsUp, MessageCircle, Clock, AlertTriangle, CornerDownRight, X } from 'lucide-react';
 
 interface Reply {
   id: string;
@@ -80,6 +81,41 @@ const statusLabels: Record<string, string> = {
   moved: '已移帖',
 };
 
+function ImgWithPreview({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <img
+        src={src}
+        alt={alt}
+        referrerPolicy="no-referrer"
+        className={`cursor-pointer ${className || ''}`}
+        onClick={() => setOpen(true)}
+      />
+      {open && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setOpen(false)}
+        >
+          <button
+            className="absolute top-4 right-4 text-white/80 hover:text-white"
+            onClick={() => setOpen(false)}
+          >
+            <X className="size-8" />
+          </button>
+          <img
+            src={src}
+            alt={alt}
+            referrerPolicy="no-referrer"
+            className="max-w-full max-h-[90vh] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
 function ViolationButton({ onClick, className }: { onClick: () => void; className?: string }) {
   return (
     <Button
@@ -136,11 +172,10 @@ function ReplyItem({
         {reply.status !== 'deleted' && reply.contentImages && reply.contentImages.length > 0 && (
           <div className="mt-2 flex gap-1.5 flex-wrap">
             {reply.contentImages.map((img, i) => (
-              <img
+              <ImgWithPreview
                 key={i}
                 src={img}
                 alt={`图片 ${i + 1}`}
-                referrerPolicy="no-referrer"
                 className="size-16 rounded-lg object-cover ring-1 ring-gray-200"
               />
             ))}
@@ -184,11 +219,10 @@ function CommentItem({
       {comment.status !== 'deleted' && comment.contentImages && comment.contentImages.length > 0 && (
         <div className="mt-2 flex gap-1.5 flex-wrap">
           {comment.contentImages.map((img, i) => (
-            <img
+            <ImgWithPreview
               key={i}
               src={img}
               alt={`图片 ${i + 1}`}
-              referrerPolicy="no-referrer"
               className="size-16 rounded-lg object-cover ring-1 ring-gray-200"
             />
           ))}
@@ -274,11 +308,10 @@ export function FeedDetail({
             {feed.images && feed.images.length > 0 && (
               <div className="grid grid-cols-3 gap-2">
                 {feed.images.map((img, i) => (
-                  <img
+                  <ImgWithPreview
                     key={i}
                     src={img}
                     alt={`图片 ${i + 1}`}
-                    referrerPolicy="no-referrer"
                     className="aspect-square rounded-lg object-cover ring-1 ring-gray-200"
                   />
                 ))}
