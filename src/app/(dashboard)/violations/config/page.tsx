@@ -97,10 +97,6 @@ export default function ViolationConfigPage() {
   };
 
   const handleDelete = async (reason: ViolationReason) => {
-    if (reason.builtin) {
-      toast.error('内置原因不可删除');
-      return;
-    }
     if (!confirm(`确定删除 "${reason.name}" 吗？`)) return;
 
     try {
@@ -160,9 +156,8 @@ export default function ViolationConfigPage() {
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => handleDelete(reason)}
-                    disabled={reason.builtin}
                   >
-                    <Trash2 className={`size-3.5 ${reason.builtin ? 'text-gray-300' : 'text-red-500'}`} />
+                    <Trash2 className="size-3.5 text-red-500" />
                   </Button>
                 </div>
               </CardContent>

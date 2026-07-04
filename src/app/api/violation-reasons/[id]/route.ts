@@ -81,10 +81,6 @@ export async function DELETE(
       return error("违规原因不存在", 404);
     }
 
-    if (existing.is_builtin) {
-      return error("内置违规原因不可删除", 403);
-    }
-
     await prisma.violationReason.delete({
       where: { id: reasonId },
     });
