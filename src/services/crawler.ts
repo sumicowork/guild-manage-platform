@@ -105,9 +105,16 @@ function extractContentText(content: any): string | null {
 
 // ─── Upsert helpers (batch-safe) ──────────────────────────────────────
 
-async function upsertFeed(feed: any, detail?: any): Promise<void> {
+async function upsertFeed(feed: any, detail?: any, channelNameToId?: Map<string, string>): Promise<void> {
   const createTime = parseDateTime(feed.create_time);
   const createTimeRaw = toBigInt(feed.create_time_raw);
+
+  const resolveChannelId = (): string | null | undefined => {
+    if (feed.channel_id) return String(feed.channel_id);
+    if (feed.channel_name && channelNameToId?.has(feed.channel_name))
+      return channelNameToId.get(feed.channel_name);
+    return null;
+  };
 
   await prisma.feed.upsert({
     where: { feed_id: feed.feed_id },
@@ -116,7 +123,7 @@ async function upsertFeed(feed: any, detail?: any): Promise<void> {
       author: feed.author ?? null,
       author_id: feed.author_id ?? null,
       channel_name: feed.channel_name ?? null,
-      channel_id: feed.channel_id ? String(feed.channel_id) : (feed.channel_name ? channelNameToId.get(feed.channel_name) ?? null : null),
+      channel_id: resolveChannelId(),
       title: feed.title ?? null,
       content: detail?.content ?? null,
       content_snippet: feed.content_snippet ?? null,
@@ -133,7 +140,7 @@ async function upsertFeed(feed: any, detail?: any): Promise<void> {
       author: feed.author ?? undefined,
       author_id: feed.author_id ?? undefined,
       channel_name: feed.channel_name ?? undefined,
-      channel_id: feed.channel_id ? String(feed.channel_id) : (feed.channel_name ? channelNameToId.get(feed.channel_name) ?? undefined : undefined),
+      channel_id: resolveChannelId(),
       title: feed.title ?? undefined,
       content: detail?.content ?? undefined,
       content_snippet: feed.content_snippet ?? undefined,
@@ -383,7 +390,7 @@ export async function runFullCrawl(
 
       for (const feed of page.feeds) {
         try {
-          await upsertFeed(feed);
+          await upsertFeed(feed, undefined, channelNameToId);
           allFeedIds.push(feed.feed_id);
           if (feed.channel_id) {
             feedChannelMap[feed.feed_id] = String(feed.channel_id);
@@ -646,7 +653,7 @@ export async function runUpdateCrawl(
 
           if (!existing) {
             // New feed
-            await upsertFeed(feed);
+            await upsertFeed(feed, undefined, channelNameToId);
             stats.newFeeds++;
             pageHasChanges = true;
 
@@ -715,7 +722,7 @@ export async function runUpdateCrawl(
             changedFeedIds.push(feed.feed_id);
           } else if (existing.status === "deleted") {
             // Was marked deleted but now visible again — re-activate and fetch comments
-            await upsertFeed(feed);
+            await upsertFeed(feed, undefined, channelNameToId);
             stats.updatedFeeds++;
             changedFeedIds.push(feed.feed_id);
             pageHasChanges = true;
