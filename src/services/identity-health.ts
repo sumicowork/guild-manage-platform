@@ -18,9 +18,8 @@ export async function runIdentityHealthCheck(): Promise<void> {
     return;
   }
 
-  const { switchToIdentity } = await import("@/lib/cli/credentials");
+  const { switchToIdentity, buildCliEnv } = await import("@/lib/cli/credentials");
   const { spawn } = await import("child_process");
-  const path = await import("path");
 
   const cliPath = process.env.CLI_PATH || "tencent-channel-cli";
   let updated = 0;
@@ -30,10 +29,11 @@ export async function runIdentityHealthCheck(): Promise<void> {
       // Switch to this identity to set up the credential env
       await switchToIdentity(identity.id);
 
-      // Run CLI status
+      // Run CLI login status
+      const cliEnv = buildCliEnv(identity.id);
       const result = await new Promise<boolean>((resolve) => {
         const child = spawn(cliPath, ["login", "status", "--json"], {
-          env: { ...process.env },
+          env: { ...process.env, ...cliEnv },
           timeout: 15000,
         });
         let out = "";
