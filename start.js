@@ -134,7 +134,7 @@ async function main() {
     run("npm run build", {
       stdio: "inherit",
       timeout: 600000,
-      env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=2048" },
+      env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=1024" },
     });
     log("  ✓ 构建完成");
   } catch (e) {
@@ -150,7 +150,7 @@ async function main() {
   const next = spawn("node", ["./node_modules/.bin/next", "start"], {
     cwd: ROOT,
     stdio: "inherit",
-    env: { ...process.env },
+    env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=1024" },
   });
 
   next.on("exit", (code) => {
