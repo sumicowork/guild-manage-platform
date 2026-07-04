@@ -32,7 +32,7 @@ export async function runIdentityHealthCheck(): Promise<void> {
 
       // Run CLI status
       const result = await new Promise<boolean>((resolve) => {
-        const child = spawn(cliPath, ["status", "--json"], {
+        const child = spawn(cliPath, ["login", "status", "--json"], {
           env: { ...process.env },
           timeout: 15000,
         });
@@ -42,7 +42,7 @@ export async function runIdentityHealthCheck(): Promise<void> {
           if (code !== 0) return resolve(false);
           try {
             const parsed = JSON.parse(out.trim());
-            resolve(!!parsed?.data?.logged_in);
+            resolve(!!parsed?.data?.valid);
           } catch {
             resolve(false);
           }
