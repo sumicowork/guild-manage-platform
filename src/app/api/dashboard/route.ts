@@ -95,12 +95,29 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Build channel distribution from feeds
+    // Build channel distribution — feeds and comments per channel
     const channelDistribution = feedsByChannel.map((c) => ({
       channel: c.channel_name || "未分类",
       feeds: c._count.channel_name,
-      comments: 0,
+      comments: 0, // populated below
     }));
+
+    // Get comment count per channel (by joining with feeds table)
+    const commentsByChannel = await prisma.$queryRawUnsafe<
+      Array<{ channel_name: string; cnt: bigint }>
+    >(
+      `SELECT COALESCE(f.channel_name, '未分类') as channel_name, COUNT(*) as cnt
+       FROM comments c
+       JOIN feeds f ON c.feed_id = f.feed_id
+       WHERE c.status = 'active' AND f.status = 'active'
+       GROUP BY f.channel_name`
+    );
+    const commentMap = new Map<string, number>(
+      commentsByChannel.map((r) => [r.channel_name, Number(r.cnt)])
+    );
+    for (const ch of channelDistribution) {
+      ch.comments = commentMap.get(ch.channel) || 0;
+    }
 
     return success({
       stats: {
