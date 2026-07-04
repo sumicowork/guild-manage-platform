@@ -331,20 +331,26 @@ export async function POST(req: NextRequest) {
     const cliErrors: string[] = [];
     const isMove = actionType.includes("move");
     const isDelete = actionType.includes("delete");
+    console.log(`[违规] actionType="${actionType}" isMove=${isMove} isDelete=${isDelete} targetChannel=${targetChannel} targetType=${targetType}`);
     const shouldMute = !!mute?.duration;
     const feedCreateTimeStr = targetCreateTimeRaw ? String(targetCreateTimeRaw) : "";
 
     if (isMove && targetType === "feed" && resolvedTargetFeedId && targetChannel) {
       // move-feed requires numeric IDs for both target and original channel
       const originalChannel = targetChannelId || "";
+      console.log(`[移帖] targetChannel=${targetChannel} originalChannel=${originalChannel} feedId=${resolvedTargetFeedId}`);
       if (!isNumericId(targetChannel)) {
+        console.warn(`[移帖] 目标版块 ${targetChannel} 不是数字ID`);
         cliErrors.push(`移帖失败: 目标版块 "${targetChannel}" 没有数字ID，无法执行移帖`);
       } else if (!isNumericId(originalChannel)) {
+        console.warn(`[移帖] 原版块 ${originalChannel} 不是数字ID`);
         cliErrors.push("移帖失败: 帖子当前版块没有数字ID，无法执行移帖");
       } else {
         try {
+          console.log(`[移帖] 执行 movePost...`);
           const ok = await movePost(GUILD_ID, resolvedTargetFeedId, targetChannel, originalChannel, adminIdentityId);
           cliResults.push(ok ? "移帖成功" : "移帖失败");
+          console.log(`[移帖] 结果: ${ok}`);
           if (ok) {
             await prisma.feed.update({
               where: { feed_id: resolvedTargetFeedId },
@@ -354,9 +360,12 @@ export async function POST(req: NextRequest) {
             cliErrors.push("移帖失败");
           }
         } catch (e) {
+          console.error(`[移帖] 异常:`, e);
           cliErrors.push(`移帖异常: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
+    } else {
+      console.log(`[移帖] 跳过 — isMove=${isMove} targetType=${targetType} resolvedTargetFeedId=${resolvedTargetFeedId} targetChannel=${targetChannel}`);
     }
 
     if (isDelete) {
