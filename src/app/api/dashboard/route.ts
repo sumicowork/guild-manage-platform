@@ -74,6 +74,8 @@ export async function GET(req: NextRequest) {
       }),
     ]);
 
+    console.log(`[Dashboard] feeds=${totalFeeds} comments=${totalComments} members=${totalMembers}`);
+
     // Build violation trend — fill in missing days with 0
     const violationTrend: { date: string; count: number }[] = [];
     const violationByDate = new Map<string, number>();
