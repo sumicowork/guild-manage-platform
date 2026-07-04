@@ -6,6 +6,7 @@ import path from "path";
 import { getAuthUser, unauthorized, forbidden, success, error } from "@/lib/api-utils";
 import { prisma } from "@/lib/db";
 import { switchToIdentity, buildCliEnv } from "@/lib/cli/credentials";
+import { invalidateIdentityPool } from "@/lib/cli/executor";
 
 const execFileAsync = promisify(execFile);
 
@@ -171,5 +172,8 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error("Identity status check error:", err);
     return error("获取身份状态失败", 500);
+  } finally {
+    // Refresh identity pool with latest DB status
+    invalidateIdentityPool();
   }
 }

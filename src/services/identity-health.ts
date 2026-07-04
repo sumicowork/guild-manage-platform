@@ -20,6 +20,7 @@ export async function runIdentityHealthCheck(): Promise<void> {
 
   const { switchToIdentity, buildCliEnv } = await import("@/lib/cli/credentials");
   const { spawn } = await import("child_process");
+  const { invalidateIdentityPool } = await import("@/lib/cli/executor");
 
   const cliPath = process.env.CLI_PATH || "tencent-channel-cli";
   let updated = 0;
@@ -68,4 +69,5 @@ export async function runIdentityHealthCheck(): Promise<void> {
   }
 
   console.log(`[IdentityHealth] Done. Checked ${updated}/${toCheck.length} identities.`);
+  invalidateIdentityPool();
 }

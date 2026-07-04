@@ -71,10 +71,14 @@ async function getIdentityPool(): Promise<PoolIdentity[]> {
   return _identityPoolCache;
 }
 
-/** 使身份池缓存失效（如新增/删除身份后调用） */
+/** 使身份池缓存失效（如新增/删除/重新验证身份后调用） */
 export function invalidateIdentityPool(): void {
   _identityPoolCache = [];
   _poolCacheTime = 0;
+  // Clear all in-memory authFailed flags — identity health may have changed
+  for (const state of _identityStates.values()) {
+    state.authFailed = false;
+  }
 }
 
 // ── Per-identity 限流状态 ──────────────────────────────────
