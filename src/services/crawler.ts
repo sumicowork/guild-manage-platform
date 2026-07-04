@@ -116,7 +116,7 @@ async function upsertFeed(feed: any, detail?: any): Promise<void> {
       author: feed.author ?? null,
       author_id: feed.author_id ?? null,
       channel_name: feed.channel_name ?? null,
-      channel_id: feed.channel_id ? String(feed.channel_id) : null,
+      channel_id: feed.channel_id ? String(feed.channel_id) : (feed.channel_name ? channelNameToId.get(feed.channel_name) ?? null : null),
       title: feed.title ?? null,
       content: detail?.content ?? null,
       content_snippet: feed.content_snippet ?? null,
@@ -133,7 +133,7 @@ async function upsertFeed(feed: any, detail?: any): Promise<void> {
       author: feed.author ?? undefined,
       author_id: feed.author_id ?? undefined,
       channel_name: feed.channel_name ?? undefined,
-      channel_id: feed.channel_id ? String(feed.channel_id) : undefined,
+      channel_id: feed.channel_id ? String(feed.channel_id) : (feed.channel_name ? channelNameToId.get(feed.channel_name) ?? undefined : undefined),
       title: feed.title ?? undefined,
       content: detail?.content ?? undefined,
       content_snippet: feed.content_snippet ?? undefined,
@@ -587,7 +587,7 @@ export async function runUpdateCrawl(
   // Build channel_name → channel_id map for resolving batch-fetched feeds
   // (getGuildFeeds only returns channel_name, not channel_id)
   let channelNameToId: Map<string, string> = new Map();
-  if (autoRules.length > 0) {
+  {
     const channels = await prisma.feed.findMany({
       where: { channel_id: { not: null }, channel_name: { not: null } },
       select: { channel_id: true, channel_name: true },
