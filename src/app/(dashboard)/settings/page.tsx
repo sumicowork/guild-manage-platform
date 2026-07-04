@@ -12,12 +12,13 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
-import { Plus, Trash2, Loader2, Users, Shield, Terminal, RefreshCw, ExternalLink } from 'lucide-react';
+import { Plus, Trash2, Loader2, Users, Shield, Terminal, RefreshCw, ExternalLink, Pencil } from 'lucide-react';
 import AutoRulePanel from './auto-rule-panel';
 
 interface PlatformUser {
@@ -206,6 +207,25 @@ export default function SettingsPage() {
     }
   };
 
+  const [editUser, setEditUser] = useState<PlatformUser | null>(null);
+  const [editPassword, setEditPassword] = useState('');
+
+  const handleEditUser = async () => {
+    if (!editUser) return;
+    if (!editPassword || editPassword.length < 6) {
+      toast.error('密码至少需要 6 个字符');
+      return;
+    }
+    try {
+      await api.put(`/users/${editUser.id}`, { password: editPassword });
+      toast.success(`${editUser.username} 的密码已更新`);
+      setEditUser(null);
+      setEditPassword('');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '修改失败');
+    }
+  };
+
   const handleApprove = async (user: PendingUser) => {
     try {
       await api.post('/auth/register/approve', { userId: user.id });
@@ -370,6 +390,14 @@ export default function SettingsPage() {
                       {new Date(user.createdAt).toLocaleDateString('zh-CN')}
                     </span>
                   </div>
+                  <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => { setEditUser(user); setEditPassword(''); }}
+                  >
+                    <Pencil className="size-3.5 text-blue-500" />
+                  </Button>
                   <Button
                     variant="ghost"
                     size="icon-xs"
@@ -377,6 +405,7 @@ export default function SettingsPage() {
                   >
                     <Trash2 className="size-3.5 text-red-500" />
                   </Button>
+                </div>
                 </div>
               ))}
             </div>
@@ -767,6 +796,31 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Edit Password Dialog */}
+      <Dialog open={!!editUser} onOpenChange={(v) => { if (!v) setEditUser(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>修改密码</DialogTitle>
+            <DialogDescription>
+              为用户 <strong>{editUser?.username}</strong> 设置新密码
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Input
+              type="password"
+              placeholder="输入新密码（至少6位）"
+              value={editPassword}
+              onChange={(e) => setEditPassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleEditUser(); }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditUser(null)}>取消</Button>
+            <Button onClick={handleEditUser}>确认修改</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* CLI Login QR Dialog */}
       <Dialog
