@@ -23,15 +23,15 @@ export async function GET(req: NextRequest) {
       orderBy: { channel_name: "asc" },
     });
 
-    const channels: { id: string; name: string }[] = [];
+    const channels: { id: string; name: string; channel_id: string | null }[] = [];
     const seenNames = new Set<string>();
 
     for (const f of feedsWithId) {
       if (f.channel_id) {
         const name = f.channel_name ?? f.channel_id;
         if (!seenNames.has(name)) {
-          // Use channel_name as id when available — feed API OR-clause matches both
-          channels.push({ id: f.channel_name ?? f.channel_id, name });
+          // Use channel_name as id for feed filtering (OR-clause matches both)
+          channels.push({ id: f.channel_name ?? f.channel_id, name, channel_id: f.channel_id });
           seenNames.add(name);
         }
       }
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
 
     for (const f of feedsWithoutId) {
       if (f.channel_name && !seenNames.has(f.channel_name)) {
-        channels.push({ id: f.channel_name, name: f.channel_name });
+        channels.push({ id: f.channel_name, name: f.channel_name, channel_id: null });
       }
     }
 

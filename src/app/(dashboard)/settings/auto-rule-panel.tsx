@@ -41,6 +41,7 @@ interface AutoRule {
 interface Channel {
   id: string;
   name: string;
+  channel_id: string | null;
 }
 
 export default function AutoRulePanel() {
@@ -60,8 +61,8 @@ export default function AutoRulePanel() {
   const [formChannelId, setFormChannelId] = useState('');
   const [formEnabled, setFormEnabled] = useState(true);
 
-  // Channel name map: id → name
-  const channelNameMap = new Map(channels.map((c) => [c.id, c.name]));
+  // Channel name map: channel_id → name
+  const channelNameMap = new Map(channels.filter(c => c.channel_id).map((c) => [c.channel_id, c.name]));
 
   const fetchRules = useCallback(async () => {
     try {
@@ -318,8 +319,8 @@ export default function AutoRulePanel() {
                       <span className="text-sm">{channelNameMap.get(formChannelId) || '选择目标版块...'}</span>
                     </SelectTrigger>
                     <SelectContent>
-                      {channels.map((ch) => (
-                        <SelectItem key={ch.id} value={ch.id}>
+                      {channels.filter(c => c.channel_id).map((ch) => (
+                        <SelectItem key={ch.id} value={ch.channel_id!}>
                           <span className="flex items-center gap-2">
                             <Hash className="size-3 text-gray-400" />
                             {ch.name}

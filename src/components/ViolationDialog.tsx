@@ -40,6 +40,7 @@ interface ViolationReason {
 interface Channel {
   id: string;
   name: string;
+  channel_id: string | null;
 }
 
 interface ViolationDialogProps {
@@ -287,11 +288,11 @@ export function ViolationDialog({
                 <Label>目标版块</Label>
                 <Select value={targetChannel} onValueChange={(v) => setTargetChannel(v ?? '')}>
                   <SelectTrigger className="w-full">
-                    <span className="text-sm">{targetChannel ? (channels.find(c => c.id === targetChannel)?.name || '选择目标版块') : '选择目标版块'}</span>
+                    <span className="text-sm">{targetChannel ? (channels.find(c => c.channel_id === targetChannel)?.name || '选择目标版块') : '选择目标版块'}</span>
                   </SelectTrigger>
                   <SelectContent>
-                    {channels.map((ch) => (
-                      <SelectItem key={ch.id} value={ch.id}>
+                    {channels.filter(c => c.channel_id).map((ch) => (
+                      <SelectItem key={ch.id} value={ch.channel_id!}>
                         {ch.name}
                       </SelectItem>
                     ))}
