@@ -51,6 +51,7 @@ interface IdentityStatusItem {
 interface IdentityStatusResponse {
   identities: IdentityStatusItem[];
   summary: { valid: number; expired: number; noToken: number; error: number };
+  logs?: string[];
 }
 
 interface CliCheck {
@@ -104,6 +105,7 @@ export default function SettingsPage() {
   const [identityStatuses, setIdentityStatuses] = useState<IdentityStatusItem[]>([]);
   const [identitySummary, setIdentitySummary] = useState({ valid: 0, expired: 0, noToken: 0, error: 0 });
   const [identityStatusLoading, setIdentityStatusLoading] = useState(false);
+  const [identityCheckLogs, setIdentityCheckLogs] = useState<string[] | null>(null);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -145,6 +147,7 @@ export default function SettingsPage() {
       const data = await api.get<IdentityStatusResponse>('/cli/identities/status');
       setIdentityStatuses(data.identities);
       setIdentitySummary(data.summary);
+      setIdentityCheckLogs(data.logs || null);
     } catch {
       toast.error('获取身份状态失败');
     } finally {
@@ -609,6 +612,16 @@ export default function SettingsPage() {
                 )}
               </div>
             </div>
+          )}
+          {identityCheckLogs && identityCheckLogs.length > 0 && (
+            <details className="mt-3">
+              <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">
+                查看执行日志 ({identityCheckLogs.length} 行)
+              </summary>
+              <pre className="mt-2 max-h-64 overflow-auto rounded bg-gray-900 p-3 text-xs text-green-400 font-mono leading-relaxed whitespace-pre-wrap">
+                {identityCheckLogs.join('\n')}
+              </pre>
+            </details>
           )}
         </CardContent>
       </Card>

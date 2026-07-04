@@ -33,22 +33,31 @@ async function checkStatus(identityId: bigint): Promise<{
   valid: boolean;
   tokenSource: string | null;
   error?: string;
+  log: string[];
 }> {
+  const logs: string[] = [];
   try {
+    logs.push(`switchToIdentity(${identityId})...`);
     await switchToIdentity(identityId);
+    logs.push(`switchToIdentity done`);
+
     const env = buildCliEnv(identityId);
+    const dotenvValue = env.QQ_AI_CONNECT_DOTENV || '(not set)';
+    logs.push(`QQ_AI_CONNECT_DOTENV=${dotenvValue}`);
+
     const cliPath = resolveCliPath();
+    logs.push(`CLI: ${cliPath} login status --json`);
 
     const tryRun = async (bin: string) => {
-      const { stdout } = await execFileAsync(bin, ["login", "status", "--json"], {
+      const { stdout, stderr } = await execFileAsync(bin, ["login", "status", "--json"], {
         env: { ...process.env, ...env },
         timeout: 15000,
         maxBuffer: 1024 * 1024,
       });
-      return JSON.parse(stdout.trim());
+      return { stdout, stderr };
     };
 
-    let result;
+    let result: { stdout: string; stderr?: string };
     try {
       result = await tryRun(cliPath);
     } catch (err: unknown) {
@@ -60,27 +69,29 @@ async function checkStatus(identityId: bigint): Promise<{
           (err as NodeJS.ErrnoException).code === "ENOENT") &&
         !cliPath.endsWith(".cmd")
       ) {
+        logs.push(`fallback to ${cliPath}.cmd`);
         result = await tryRun(cliPath + ".cmd");
       } else {
         throw err;
       }
     }
 
-    if (result?.success && result?.data) {
-      return {
-        valid: result.data.valid === true,
-        tokenSource: result.data.tokenSource || null,
-      };
+    const parsed = JSON.parse(result.stdout.trim());
+    logs.push(`CLI raw: ${result.stdout.trim().substring(0, 200)}`);
+
+    if (parsed?.success && parsed?.data) {
+      const valid = parsed.data.valid === true;
+      const tokenSource = parsed.data.tokenSource || null;
+      logs.push(`result: valid=${valid} tokenSource=${tokenSource}`);
+      return { valid, tokenSource, log: logs };
     }
 
-    // success: false — token is likely invalid
-    return { valid: false, tokenSource: null };
+    logs.push(`result: CLI success=false`);
+    return { valid: false, tokenSource: null, log: logs };
   } catch (err) {
-    return {
-      valid: false,
-      tokenSource: null,
-      error: err instanceof Error ? err.message.slice(0, 200) : "检查失败",
-    };
+    const errMsg = err instanceof Error ? err.message.slice(0, 200) : "检查失败";
+    logs.push(`ERROR: ${errMsg}`);
+    return { valid: false, tokenSource: null, error: errMsg, log: logs };
   }
 }
 
@@ -118,7 +129,9 @@ export async function GET(req: NextRequest) {
       status: "valid" | "expired" | "no_token" | "error";
       tokenSource: string | null;
       error?: string;
+      log?: string[];
     }> = [];
+    const allLogs: string[] = [];
 
     for (const identity of identities) {
       const base = {
@@ -128,17 +141,22 @@ export async function GET(req: NextRequest) {
       };
 
       if (!identity.token) {
-        results.push({ ...base, status: "no_token" as const });
+        const entry = { ...base, status: "no_token" as const, log: [`${identity.nickname}: no token in DB`] };
+        results.push(entry);
+        allLogs.push(`[${identity.nickname}] SKIP: no token stored`);
         continue;
       }
 
       const status = await checkStatus(identity.id);
+      allLogs.push(`[${identity.nickname}] ${"=".repeat(20)}`);
+      allLogs.push(...status.log.map(l => `  ${l}`));
+
       if (status.error) {
-        results.push({ ...base, status: "error" as const, error: status.error });
+        results.push({ ...base, status: "error" as const, error: status.error, log: status.log });
       } else if (status.valid) {
-        results.push({ ...base, status: "valid" as const, tokenSource: status.tokenSource });
+        results.push({ ...base, status: "valid" as const, tokenSource: status.tokenSource, log: status.log });
       } else {
-        results.push({ ...base, status: "expired" as const });
+        results.push({ ...base, status: "expired" as const, log: status.log });
       }
     }
 
@@ -149,7 +167,7 @@ export async function GET(req: NextRequest) {
       error: results.filter((r) => r.status === "error").length,
     };
 
-    return success({ identities: results, summary });
+    return success({ identities: results, summary, logs: allLogs });
   } catch (err) {
     console.error("Identity status check error:", err);
     return error("获取身份状态失败", 500);
