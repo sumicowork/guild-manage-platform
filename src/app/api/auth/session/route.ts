@@ -1,6 +1,44 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, success, error, serializeBigInt } from "@/lib/api-utils";
+import { switchToIdentity, buildCliEnv } from "@/lib/cli/credentials";
+import { getCachedIdentityStatus, setCachedIdentityStatus } from "@/lib/identity-cache";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import fs from "fs";
+import path from "path";
+
+const execFileAsync = promisify(execFile);
+
+function resolveCliPath(): string {
+  const base = process.env.CLI_PATH || "tencent-channel-cli";
+  if (path.isAbsolute(base)) {
+    if (fs.existsSync(base)) return base;
+    if (process.platform === "win32" && fs.existsSync(base + ".cmd")) return base + ".cmd";
+    return base;
+  }
+  const localBin = path.join(process.cwd(), "node_modules", ".bin", base);
+  if (fs.existsSync(localBin)) return localBin;
+  if (process.platform === "win32" && fs.existsSync(localBin + ".cmd")) return localBin + ".cmd";
+  return base;
+}
+
+async function checkIdentityLive(identityId: bigint): Promise<string> {
+  try {
+    await switchToIdentity(identityId);
+    const env = buildCliEnv(identityId);
+    const cliPath = resolveCliPath();
+    const { stdout } = await execFileAsync(cliPath, ["login", "status", "--json"], {
+      env: { ...process.env, ...env },
+      timeout: 15000,
+      maxBuffer: 1024 * 1024,
+    });
+    const result = JSON.parse(stdout.trim());
+    return result?.data?.valid ? "ready" : "expired";
+  } catch {
+    return "expired";
+  }
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -9,35 +47,28 @@ export async function GET(req: NextRequest) {
 
     const user = await prisma.platformUser.findUnique({
       where: { id: BigInt(auth.userId) },
-      select: {
-        id: true,
-        username: true,
-        display_name: true,
-        role: true,
-      },
+      select: { id: true, username: true, display_name: true, role: true },
     });
 
-    if (!user) {
-      return error("用户不存在", 404);
-    }
+    if (!user) return error("用户不存在", 404);
 
-    // Check identity status (admin always passes)
     let identityStatus = "ready";
     if (user.role !== "admin") {
       const identity = await prisma.adminIdentity.findFirst({
         where: { nickname: user.username },
-        select: { id: true, token: true, token_expires: true, status: true },
+        select: { id: true, token: true },
       });
+
       if (!identity || !identity.token) {
         identityStatus = "needs_login";
-      } else if (identity.status !== "active") {
-        // DB status periodically synced by identity health check cron
-        identityStatus = "expired";
-      } else if (
-        identity.token_expires &&
-        identity.token_expires < new Date()
-      ) {
-        identityStatus = "expired";
+      } else {
+        const cached = getCachedIdentityStatus(user.username);
+        if (cached !== undefined) {
+          identityStatus = cached;
+        } else {
+          identityStatus = await checkIdentityLive(identity.id);
+          setCachedIdentityStatus(user.username, identityStatus);
+        }
       }
     }
 

@@ -63,7 +63,7 @@ async function getIdentityPool(): Promise<PoolIdentity[]> {
     return _identityPoolCache;
   }
   _identityPoolCache = await prisma.adminIdentity.findMany({
-    where: { status: "active", token: { not: "" } },
+    where: { token: { not: "" } },
     select: { id: true, nickname: true },
     orderBy: { id: "asc" },
   });
@@ -476,14 +476,7 @@ export async function executeCli(
     if (result.code === CliErrorCode.AUTH_FAILURE) {
       if (currentIdentityId) {
         markIdentityAuthFailed(currentIdentityId);
-        // 同时更新 DB 状态
-        try {
-          await prisma.adminIdentity.update({
-            where: { id: BigInt(currentIdentityId) },
-            data: { status: "expired" },
-          });
-          invalidateIdentityPool();
-        } catch { /* non-critical */ }
+      invalidateIdentityPool();
       }
 
       // 如果未手动指定身份，尝试切换到其他身份

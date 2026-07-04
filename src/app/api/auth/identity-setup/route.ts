@@ -6,6 +6,7 @@ import path from "path";
 import { getAuthUser, unauthorized, success, error } from "@/lib/api-utils";
 import { prisma } from "@/lib/db";
 import { switchToIdentity, buildCliEnv, saveCurrentTokenToIdentity } from "@/lib/cli/credentials";
+import { clearIdentityCache } from "@/lib/identity-cache";
 
 const execFileAsync = promisify(execFile);
 
@@ -113,6 +114,9 @@ export async function GET(req: NextRequest) {
       where: { id: identity.id },
       data: { status: "active", token_expires: null },
     });
+
+    // Clear cached identity check so session re-validates immediately
+    clearIdentityCache(auth.username);
 
     return success({ message: "身份设置成功" });
   } catch (err: unknown) {

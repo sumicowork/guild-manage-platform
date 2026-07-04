@@ -156,8 +156,17 @@ export async function GET(req: NextRequest) {
         results.push({ ...base, status: "error" as const, error: status.error, log: status.log });
       } else if (status.valid) {
         results.push({ ...base, status: "valid" as const, tokenSource: status.tokenSource, log: status.log });
+        // Sync DB status on admin manual check
+        prisma.adminIdentity.update({
+          where: { id: identity.id },
+          data: { status: "active" },
+        }).catch(() => {});
       } else {
         results.push({ ...base, status: "expired" as const, log: status.log });
+        prisma.adminIdentity.update({
+          where: { id: identity.id },
+          data: { status: "expired" },
+        }).catch(() => {});
       }
     }
 
