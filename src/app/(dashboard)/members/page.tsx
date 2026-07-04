@@ -322,7 +322,7 @@ export default function MembersPage() {
         onOpenChange={setDetailOpen}
         onFeedClick={(feedId) => {
           setDetailOpen(false);
-          router.push(`/dashboard/feeds?feedId=${feedId}`);
+          router.push(`/feeds?feedId=${feedId}`);
         }}
       />
     </div>
