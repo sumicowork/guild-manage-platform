@@ -4,6 +4,7 @@ import { getAuthUser, unauthorized, forbidden, success, error, serializeBigInt, 
 import type { Prisma } from "@/generated/prisma/client";
 import { movePost, deletePost, deleteComment, deleteReply, postComment } from "@/lib/cli/feed";
 import { muteUser, kickUser, sendDM } from "@/lib/cli/member";
+import { switchToIdentity } from "@/lib/cli/credentials";
 
 const GUILD_ID = process.env.GUILD_ID || "82203161765285899";
 
@@ -276,6 +277,15 @@ export async function POST(req: NextRequest) {
     if (targetChannel) resolvedActionDetail.movedToChannel = targetChannel;
     if (mute?.duration) resolvedActionDetail.muteDurationHours = mute.duration;
     if (actionDetail) Object.assign(resolvedActionDetail, actionDetail);
+
+    // ── 凭证预检：创建违规记录前先验证操作身份 token ──
+    if (adminIdentityId) {
+      try {
+        await switchToIdentity(BigInt(adminIdentityId));
+      } catch (e: any) {
+        return error(e.message || "操作身份凭证无效", 400);
+      }
+    }
 
     // Create the violation record
     const violation = await prisma.violation.create({
