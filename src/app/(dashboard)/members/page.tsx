@@ -28,6 +28,7 @@ import { Search, Tag, MoreHorizontal, Plus, X } from 'lucide-react';
 interface Member {
   tinyid: string;
   nickname: string;
+  globalNickname?: string;
   role: string;
   joinedAt: string;
   status: string;
@@ -134,7 +135,14 @@ export default function MembersPage() {
   };
 
   const columns: Column<Member>[] = [
-    { key: 'nickname', header: '昵称', width: '120px' },
+    { key: 'nickname', header: '昵称', width: '140px', render: (m) => (
+      <div className="flex flex-col">
+        <span className="text-sm text-gray-900 truncate">{m.nickname || '-'}</span>
+        {m.globalNickname && m.globalNickname !== m.nickname && (
+          <span className="text-[11px] text-gray-400 truncate">{m.globalNickname}</span>
+        )}
+      </div>
+    )},
     {
       key: 'tinyid',
       header: 'tinyid',
