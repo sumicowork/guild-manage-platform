@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { DataTable, Column } from '@/components/DataTable';
@@ -20,6 +21,7 @@ interface Violation {
   createdAt: string;
   targetType: string;
   targetId: string;
+  targetFeedId?: string;
   targetAuthor: string;
   reason: string;
   actionType: string;
@@ -54,6 +56,7 @@ const targetTypeLabels: Record<string, string> = {
 };
 
 export default function ViolationsPage() {
+  const router = useRouter();
   const { user } = useAuth();
   const [violations, setViolations] = useState<Violation[]>([]);
   const [total, setTotal] = useState(0);
@@ -200,6 +203,29 @@ export default function ViolationsPage() {
       render: (v) => (
         <span className="text-xs text-gray-500">{v.identityName || '-'}</span>
       ),
+    },
+    {
+      key: 'actionType',
+      header: '',
+      width: '60px',
+      align: 'center',
+      render: (v) => {
+        const fid = v.targetType === 'feed' ? v.targetId : v.targetFeedId;
+        if (!fid) return null;
+        return (
+          <Button
+            variant="ghost"
+            size="xs"
+            className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 text-[11px] px-1.5 py-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              router.push(`/feeds?feedId=${fid}`);
+            }}
+          >
+            查看
+          </Button>
+        );
+      },
     },
   ];
 
