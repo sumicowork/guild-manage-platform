@@ -54,13 +54,11 @@ export async function switchToIdentity(identityId: bigint | number | null | unde
   });
 
   if (!identity) {
-    console.warn(`[credentials] Admin identity ${identityId} not found`);
-    return;
+    throw new Error(`操作身份 (ID=${identityId}) 不存在`);
   }
 
   if (!identity.token) {
-    console.warn(`[credentials] Admin identity ${identityId} has no stored token`);
-    return;
+    throw new Error(`操作身份 "${identity.nickname}" 尚未录入凭证，请先在设置页完成扫码登录`);
   }
 
   const token = decrypt(identity.token).replace(/^["']|["']$/g, "");
