@@ -75,6 +75,7 @@ export default function MembersPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [tagFilter, setTagFilter] = useState('');
+  const [tagMenuTarget, setTagMenuTarget] = useState<string | null>(null);
   const [sortField, setSortField] = useState('joinedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -221,29 +222,36 @@ export default function MembersPage() {
               </button>
             </Badge>
           ))}
-          <DropdownMenu>
-            <DropdownMenuTrigger className="inline-flex items-center justify-center rounded-md p-1 hover:bg-gray-100" onClick={(e) => e.stopPropagation()}>
+          <div className="relative inline-flex">
+            <button
+              className="inline-flex items-center justify-center rounded-md p-1 hover:bg-gray-100"
+              onClick={(e) => { e.stopPropagation(); setTagMenuTarget(tagMenuTarget === m.tinyid ? null : m.tinyid); }}
+            >
               <Plus className="size-3" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuLabel>添加标签</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {availableTags
-                .filter((t) => !m.tags.includes(t))
-                .map((tag) => (
-                  <DropdownMenuItem
-                    key={tag}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleAddTag(m.tinyid, tag);
-                    }}
-                  >
-                    <Tag className="size-3" />
-                    {tag}
-                  </DropdownMenuItem>
-                ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </button>
+            {tagMenuTarget === m.tinyid && (
+              <div className="absolute left-0 top-full z-50 mt-1 min-w-[120px] rounded-lg bg-white py-1 shadow-lg ring-1 ring-black/5">
+                <div className="px-2 py-1 text-xs font-medium text-gray-500">添加标签</div>
+                <div className="my-1 h-px bg-gray-100" />
+                {availableTags
+                  .filter((t) => !m.tags.includes(t))
+                  .map((tag) => (
+                    <button
+                      key={tag}
+                      className="flex w-full items-center gap-1.5 px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleAddTag(m.tinyid, tag);
+                        setTagMenuTarget(null);
+                      }}
+                    >
+                      <Tag className="size-3" />
+                      {tag}
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
         </div>
       ),
     },
