@@ -47,11 +47,9 @@ function SelectTrigger({
       {...props}
     >
       {children}
-      <SelectPrimitive.Icon
-        render={(props) => (
-          <ChevronDownIcon {...props} className="pointer-events-none size-4 text-muted-foreground" />
-        )}
-      />
+      <SelectPrimitive.Icon>
+        <ChevronDownIcon className="pointer-events-none size-4 text-muted-foreground" />
+      </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   )
 }
@@ -125,11 +123,7 @@ function SelectItem({
       <SelectPrimitive.ItemText className="flex flex-1 shrink-0 gap-2 whitespace-nowrap">
         {children}
       </SelectPrimitive.ItemText>
-      <SelectPrimitive.ItemIndicator
-        render={(props) => (
-          <span {...props} className="pointer-events-none absolute right-2 flex size-4 items-center justify-center" />
-        )}
-      >
+      <SelectPrimitive.ItemIndicator>
         <CheckIcon className="pointer-events-none" />
       </SelectPrimitive.ItemIndicator>
     </SelectPrimitive.Item>
