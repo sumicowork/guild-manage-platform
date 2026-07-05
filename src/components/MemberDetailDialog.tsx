@@ -101,12 +101,11 @@ const actionLabels: Record<string, string> = {
   delete_comment: '删评论',
 };
 
-type Tab = 'feeds' | 'comments' | 'replies' | 'violations';
+type Tab = 'feeds' | 'comments' | 'violations';
 
 const tabs: { key: Tab; label: string }[] = [
   { key: 'feeds', label: '发帖' },
   { key: 'comments', label: '评论' },
-  { key: 'replies', label: '评论' },
   { key: 'violations', label: '违规' },
 ];
 
@@ -159,8 +158,7 @@ export function MemberDetailDialog({ tinyid, open, onOpenChange, onFeedClick }: 
               <div className="grid grid-cols-5 gap-2">
                 {[
                   { label: '发帖', value: data.stats.feedCount },
-                  { label: '评论', value: data.stats.commentCount },
-                  { label: '评论', value: data.stats.replyCount },
+                  { label: '评论', value: data.stats.commentCount + data.stats.replyCount },
                   { label: '获赞', value: data.stats.likeCount },
                   { label: '违规', value: data.stats.violationCount },
                 ].map((stat) => (
@@ -186,8 +184,7 @@ export function MemberDetailDialog({ tinyid, open, onOpenChange, onFeedClick }: 
                     {tab.label}
                     <span className="ml-1 text-[10px] opacity-60">
                       {tab.key === 'feeds' ? data.stats.feedCount :
-                       tab.key === 'comments' ? data.stats.commentCount :
-                       tab.key === 'replies' ? data.stats.replyCount :
+                       tab.key === 'comments' ? data.stats.commentCount + data.stats.replyCount :
                        data.stats.violationCount}
                     </span>
                   </Button>
@@ -236,51 +233,34 @@ export function MemberDetailDialog({ tinyid, open, onOpenChange, onFeedClick }: 
                 )}
 
                 {activeTab === 'comments' && (
-                  data.comments.length > 0 ? (
+                  (data.comments.length > 0 || data.replies.length > 0) ? (
                     <div className="space-y-2">
-                      {data.comments.map((comment) => (
+                      {[...data.comments.map(c => ({ ...c, kind: 'comment' as const, ts: c.createdAt })),
+                        ...data.replies.map(r => ({ ...r, kind: 'reply' as const, ts: r.createdAt }))]
+                        .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
+                        .map((item) => (
                         <div
-                          key={comment.id}
+                          key={item.kind + item.id}
                           className="rounded-lg bg-gray-50 px-3 py-2.5 ring-1 ring-gray-100 cursor-pointer hover:bg-gray-100 transition-colors"
-                          onClick={() => onFeedClick?.(comment.feedId)}
+                          onClick={() => item.feedId && onFeedClick?.(item.feedId)}
                         >
-                          <p className="text-sm text-gray-700 line-clamp-2">{comment.content}</p>
+                          {item.kind === 'reply' && (
+                            <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mb-1">
+                              <CornerDownRight className="size-3 shrink-0" />
+                              {'targetUser' in item && item.targetUser && (
+                                <span>回复 <span className="text-blue-500">@{item.targetUser}</span></span>
+                              )}
+                            </div>
+                          )}
+                          <p className="text-sm text-gray-700 line-clamp-2">{item.content}</p>
                           <div className="mt-1.5 flex items-center gap-2 text-[11px] text-gray-400">
-                            <span className="truncate">帖子: {comment.feedTitle || '(未知)'}</span>
-                            <span className="shrink-0">{new Date(comment.createdAt).toLocaleDateString('zh-CN')}</span>
-                            {comment.likeCount > 0 && (
+                            <span className="truncate">帖子: {'feedTitle' in item ? item.feedTitle || '(未知)' : '(未知)'}</span>
+                            <span className="shrink-0">{new Date(item.ts).toLocaleDateString('zh-CN')}</span>
+                            {'likeCount' in item && item.likeCount > 0 && (
                               <span className="flex items-center gap-0.5 shrink-0">
-                                <ThumbsUp className="size-3" /> {comment.likeCount}
+                                <ThumbsUp className="size-3" /> {item.likeCount}
                               </span>
                             )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="py-8 text-center text-sm text-gray-400">暂无评论</p>
-                  )
-                )}
-
-                {activeTab === 'replies' && (
-                  data.replies.length > 0 ? (
-                    <div className="space-y-2">
-                      {data.replies.map((reply) => (
-                        <div
-                          key={reply.id}
-                          className="rounded-lg bg-gray-50 px-3 py-2.5 ring-1 ring-gray-100 cursor-pointer hover:bg-gray-100 transition-colors"
-                          onClick={() => onFeedClick?.(reply.feedId)}
-                        >
-                          <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mb-1">
-                            <CornerDownRight className="size-3 shrink-0" />
-                            {reply.targetUser && (
-                              <span>回复 <span className="text-blue-500">@{reply.targetUser}</span></span>
-                            )}
-                          </div>
-                          <p className="text-sm text-gray-700 line-clamp-2">{reply.content}</p>
-                          <div className="mt-1.5 flex items-center gap-2 text-[11px] text-gray-400">
-                            <span className="truncate">帖子: {reply.feedTitle || '(未知)'}</span>
-                            <span className="shrink-0">{new Date(reply.createdAt).toLocaleDateString('zh-CN')}</span>
                           </div>
                         </div>
                       ))}
