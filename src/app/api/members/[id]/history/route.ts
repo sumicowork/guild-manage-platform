@@ -125,7 +125,7 @@ export async function GET(
       comments: rawComments.map((c: any) => ({
         id: String(c.id),
         commentId: c.commentId,
-        content: c.contentText || c.content,
+        content: typeof c.contentText === 'string' ? c.contentText : (c.content?.text ?? String(c.content ?? '')),
         createdAt: c.createTime,
         feedId: c.feed?.feedId ?? '',
         feedTitle: c.feed?.title ?? '',
@@ -134,7 +134,7 @@ export async function GET(
       replies: rawReplies.map((r: any) => ({
         id: String(r.id),
         replyId: r.replyId,
-        content: r.contentText || r.content,
+        content: typeof r.contentText === 'string' ? r.contentText : (r.content?.text ?? String(r.content ?? '')),
         createdAt: r.createTime,
         feedId: r.comment?.feed?.feedId ?? '',
         feedTitle: r.comment?.feed?.title ?? '',
