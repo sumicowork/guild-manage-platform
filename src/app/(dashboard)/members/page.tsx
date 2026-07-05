@@ -31,6 +31,7 @@ interface Member {
   globalNickname?: string;
   role: string;
   joinedAt: string;
+  leftAt?: string;
   status: string;
   feedCount: number;
   commentCount: number;
@@ -172,11 +173,18 @@ export default function MembersPage() {
     {
       key: 'status',
       header: '状态',
-      width: '80px',
+      width: '100px',
       render: (m) => (
-        <Badge className={statusColors[m.status] || 'bg-gray-200 text-gray-700'}>
-          {statusLabels[m.status] || m.status}
-        </Badge>
+        <div className="flex flex-col items-center">
+          <Badge className={statusColors[m.status] || 'bg-gray-200 text-gray-700'}>
+            {statusLabels[m.status] || m.status}
+          </Badge>
+          {m.status === 'left' && m.leftAt && (
+            <span className="text-[10px] text-gray-400 mt-0.5">
+              {new Date(m.leftAt).toLocaleDateString('zh-CN')}
+            </span>
+          )}
+        </div>
       ),
     },
     {
