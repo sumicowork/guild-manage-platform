@@ -2,14 +2,15 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, success, error } from "@/lib/api-utils";
 
-// Helper to resolve member by BigInt id or tinyid string
+// Helper to resolve member by tinyid first (most common), then BigInt id
 async function findMember(idOrTinyid: string) {
+  let member = await prisma.member.findUnique({ where: { tinyid: idOrTinyid } });
+  if (member) return member;
   try {
     const memberId = BigInt(idOrTinyid);
-    return prisma.member.findUnique({ where: { id: memberId } });
-  } catch {
-    return prisma.member.findUnique({ where: { tinyid: idOrTinyid } });
-  }
+    member = await prisma.member.findUnique({ where: { id: memberId } });
+  } catch { /* not a valid BigInt */ }
+  return member;
 }
 
 export async function DELETE(
