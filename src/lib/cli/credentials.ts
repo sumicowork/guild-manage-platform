@@ -73,14 +73,6 @@ export async function switchToIdentity(identityId: bigint | number | null | unde
   // Restrict file permissions to owner-only (0o600) — prevent other users from reading token
   try { fs.chmodSync(envPath, 0o600); } catch { /* chmod may fail on some platforms */ }
 
-  // Also write to the default ~/.qqcli/.env as fallback
-  // (some CLI builds ignore QQ_AI_CONNECT_DOTENV and only read default path)
-  const defaultEnvPath = path.join(getCredentialBaseDir(), ".env");
-  try {
-    fs.writeFileSync(defaultEnvPath, header + `QQ_AI_CONNECT_TOKEN="${token}"\n`, "utf-8");
-    try { fs.chmodSync(defaultEnvPath, 0o600); } catch { /* ignore */ }
-  } catch { /* best-effort fallback */ }
-
   console.log(`[credentials] Switched to admin identity ${identity.id} (${identity.nickname})`);
 }
 
