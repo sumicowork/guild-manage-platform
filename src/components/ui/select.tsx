@@ -85,9 +85,7 @@ function SelectContent({
           {...props}
         >
           <SelectScrollUpButton />
-          <SelectPrimitive.List>
-            <SelectPrimitive.RadioGroup>{children}</SelectPrimitive.RadioGroup>
-          </SelectPrimitive.List>
+          <SelectPrimitive.List>{children}</SelectPrimitive.List>
           <SelectScrollDownButton />
         </SelectPrimitive.Popup>
       </SelectPrimitive.Positioner>
