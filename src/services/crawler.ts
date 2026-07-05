@@ -383,6 +383,22 @@ export async function runFullCrawl(
     const allFeedIds: string[] = [];
     const feedChannelMap: Record<string, string> = {}; // feed_id → channel_id
 
+    // Build channel_name → channel_id map (getGuildFeeds only returns channel_name)
+    const channelNameToId = new Map<string, string>();
+    {
+      const channels = await prisma.feed.findMany({
+        where: { channel_id: { not: null }, channel_name: { not: null } },
+        select: { channel_id: true, channel_name: true },
+        distinct: ['channel_name'],
+      });
+      for (const ch of channels) {
+        if (ch.channel_id && ch.channel_name) {
+          channelNameToId.set(ch.channel_name, ch.channel_id);
+        }
+      }
+      log(taskId, `Channel map: ${channelNameToId.size} entries`);
+    }
+
     while (true) {
       checkAbort(signal, taskId);
       const page = await getGuildFeeds(gid, cursor, 500, 2, adminIdentityId);
