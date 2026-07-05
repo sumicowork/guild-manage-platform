@@ -110,6 +110,13 @@ export function ViolationDialog({
     setNotifyContent(content);
   }, [selectedReasonId, reasons, globalTemplate, muteEnabled, muteDuration, customHours]);
 
+  // When action is delete_comment/delete_reply, force notifyType to dm (can't reply to deleted comment)
+  useEffect(() => {
+    if (actionType === 'delete_comment' || actionType === 'delete_reply') {
+      setNotifyType('dm');
+    }
+  }, [actionType]);
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -201,6 +208,7 @@ export function ViolationDialog({
       ? [
           { value: 'move', label: '移帖' },
           { value: 'delete', label: '删帖' },
+          { value: 'none', label: '不处理' },
         ]
       : targetType === 'reply'
       ? [{ value: 'delete_reply', label: '删评论' }]
@@ -389,6 +397,7 @@ export function ViolationDialog({
                       size="sm"
                       onClick={() => setNotifyType('reply')}
                       type="button"
+                      disabled={actionType === 'delete_comment' || actionType === 'delete_reply'}
                     >
                       评论
                     </Button>
