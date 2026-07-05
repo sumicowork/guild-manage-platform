@@ -197,7 +197,12 @@ model ViolationReason {
   @@map("violation_reasons")
 }
 
-// ─── 平台用户 ───
+model AppConfig {
+  key   String @id
+  value String
+
+  @@map("app_config")
+}// ─── 平台用户 ───
 model PlatformUser {
   id           BigInt   @id @default(autoincrement())
   username     String   @unique

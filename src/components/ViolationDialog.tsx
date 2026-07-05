@@ -77,6 +77,7 @@ export function ViolationDialog({
   const [notifyEnabled, setNotifyEnabled] = useState(true);
   const [notifyType, setNotifyType] = useState<string>('reply');
   const [notifyContent, setNotifyContent] = useState('');
+  const [globalTemplate, setGlobalTemplate] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [identities, setIdentities] = useState<AdminIdentity[]>([]);
@@ -88,23 +89,32 @@ export function ViolationDialog({
     }
   }, [open]);
 
+  // Build notification content from global template when reason or mute changes
   useEffect(() => {
+    if (!globalTemplate) return;
     const reason = reasons.find((r) => r.id === Number(selectedReasonId));
-    if (reason?.notificationTemplate) {
-      setNotifyContent(reason.notificationTemplate);
-    }
-  }, [selectedReasonId, reasons]);
+    if (!reason) return;
+    const muteText = muteEnabled
+      ? `并对您的账号作【${muteDuration === 'custom' ? (customHours || '24') + '小时' : muteDuration}禁言】处理。`
+      : '';
+    const content = globalTemplate
+      .replace(/\{违规原因\}/g, reason.name)
+      .replace(/\{禁言处理\}/g, muteText);
+    setNotifyContent(content);
+  }, [selectedReasonId, reasons, globalTemplate, muteEnabled, muteDuration, customHours]);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [reasonsData, channelsData, identitiesData] = await Promise.all([
+      const [reasonsData, channelsData, identitiesData, templateData] = await Promise.all([
         api.get<ViolationReason[]>('/violation-reasons'),
         api.get<Channel[]>('/channels'),
         api.get<AdminIdentity[]>('/admin-identities'),
+        api.get<{ template: string }>('/app-config/violation-notification-template').catch(() => ({ template: '' })),
       ]);
       setReasons(reasonsData);
       setChannels(channelsData);
+      setGlobalTemplate(templateData.template || '');
 
       // Operator: only show own identity (matched by nickname === username)
       let filteredIdentities = identitiesData;

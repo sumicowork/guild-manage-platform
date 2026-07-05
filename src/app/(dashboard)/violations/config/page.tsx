@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Save } from 'lucide-react';
 
 interface ViolationReason {
   id: number;
@@ -34,8 +34,12 @@ export default function ViolationConfigPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editingReason, setEditingReason] = useState<ViolationReason | null>(null);
   const [formName, setFormName] = useState('');
-  const [formTemplate, setFormTemplate] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Global template state
+  const [globalTemplate, setGlobalTemplate] = useState('');
+  const [globalTemplateLoaded, setGlobalTemplateLoaded] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
   const fetchReasons = useCallback(async () => {
     try {
@@ -48,21 +52,47 @@ export default function ViolationConfigPage() {
     }
   }, []);
 
+  const fetchGlobalTemplate = useCallback(async () => {
+    try {
+      const data = await api.get<{ template: string }>('/app-config/violation-notification-template');
+      setGlobalTemplate(data.template);
+    } catch {
+      // use default
+    } finally {
+      setGlobalTemplateLoaded(true);
+    }
+  }, []);
+
   useEffect(() => {
     fetchReasons();
-  }, [fetchReasons]);
+    fetchGlobalTemplate();
+  }, [fetchReasons, fetchGlobalTemplate]);
+
+  const saveGlobalTemplate = async () => {
+    if (!globalTemplate.trim()) {
+      toast.error('模板不能为空');
+      return;
+    }
+    setSavingTemplate(true);
+    try {
+      await api.put('/app-config/violation-notification-template', { template: globalTemplate });
+      toast.success('通知模板已更新');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '保存失败');
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
 
   const openAdd = () => {
     setEditingReason(null);
     setFormName('');
-    setFormTemplate('');
     setEditOpen(true);
   };
 
   const openEdit = (reason: ViolationReason) => {
     setEditingReason(reason);
     setFormName(reason.name);
-    setFormTemplate(reason.notificationTemplate || '');
     setEditOpen(true);
   };
 
@@ -77,13 +107,11 @@ export default function ViolationConfigPage() {
       if (editingReason) {
         await api.put(`/violation-reasons/${editingReason.id}`, {
           name: formName.trim(),
-          notificationTemplate: formTemplate,
         });
         toast.success('已更新');
       } else {
         await api.post('/violation-reasons', {
           name: formName.trim(),
-          notificationTemplate: formTemplate,
         });
         toast.success('已添加');
       }
@@ -109,16 +137,52 @@ export default function ViolationConfigPage() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* Global notification template */}
+      <Card className="bg-white border-blue-200">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <span className="size-1.5 rounded-full bg-blue-500" />
+            通知模板（全局）
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-gray-400 mb-3">
+            此模板对所有违规原因统一生效。变量：<code className="bg-gray-100 px-1 rounded">{'{违规原因}'}</code> 替换为原因名称，<code className="bg-gray-100 px-1 rounded">{'{禁言处理}'}</code> 在启用禁言时自动插入禁言语句，否则为空。
+          </p>
+          <div className="flex items-start gap-3">
+            <Textarea
+              value={globalTemplate}
+              onChange={(e) => setGlobalTemplate(e.target.value)}
+              rows={4}
+              className="flex-1 font-mono text-sm"
+              placeholder="输入通知模板..."
+            />
+            <Button
+              size="sm"
+              onClick={saveGlobalTemplate}
+              disabled={savingTemplate}
+              type="button"
+              className="shrink-0"
+            >
+              {savingTemplate && <Loader2 className="animate-spin size-3.5" />}
+              <Save className="size-3.5" />
+              保存
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Reason list */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">违规配置</h2>
+        <h2 className="text-lg font-semibold text-gray-900">违规原因列表</h2>
         <Button size="sm" onClick={openAdd}>
           <Plus className="size-3.5" />
           添加原因
         </Button>
       </div>
 
-      {loading ? (
+      {loading || !globalTemplateLoaded ? (
         <div className="space-y-3">
           {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-20 rounded-xl bg-gray-100" />
@@ -132,20 +196,13 @@ export default function ViolationConfigPage() {
         <div className="space-y-3">
           {reasons.map((reason) => (
             <Card key={reason.id} className="bg-white border-gray-200">
-              <CardContent className="flex items-start justify-between pt-4">
-                <div className="flex-1 space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-900">{reason.name}</span>
-                    {reason.builtin && (
-                      <Badge variant="outline" className="text-xs">
-                        内置
-                      </Badge>
-                    )}
-                  </div>
-                  {reason.notificationTemplate && (
-                    <p className="text-xs text-gray-500 line-clamp-2">
-                      通知模板: {reason.notificationTemplate}
-                    </p>
+              <CardContent className="flex items-center justify-between py-4">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-gray-900">{reason.name}</span>
+                  {reason.builtin && (
+                    <Badge variant="outline" className="text-xs">
+                      内置
+                    </Badge>
                   )}
                 </div>
                 <div className="flex items-center gap-1">
@@ -166,7 +223,7 @@ export default function ViolationConfigPage() {
         </div>
       )}
 
-      {/* Edit/Add Dialog */}
+      {/* Edit/Add Dialog — name only */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -181,18 +238,9 @@ export default function ViolationConfigPage() {
                 placeholder="例如: 发布广告"
               />
             </div>
-            <div className="space-y-2">
-              <Label>通知模板</Label>
-              <Textarea
-                value={formTemplate}
-                onChange={(e) => setFormTemplate(e.target.value)}
-                rows={4}
-                placeholder="留空则使用默认模板..."
-              />
-              <p className="text-xs text-gray-400">
-                支持变量: {'{用户昵称}'}, {'{帖子标题}'}, {'{帖子链接}'}, {'{违规原因}'}
-              </p>
-            </div>
+            <p className="text-xs text-gray-400">
+              通知内容由全局模板统一控制，无需单独配置。
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)} type="button">
