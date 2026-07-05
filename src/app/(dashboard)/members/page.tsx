@@ -181,7 +181,7 @@ export default function MembersPage() {
           </Badge>
           {m.status === 'left' && m.leftAt && (
             <span className="text-[10px] text-gray-400 mt-0.5">
-              {new Date(m.leftAt).toLocaleDateString('zh-CN')}
+              {new Date(m.leftAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
         </div>
