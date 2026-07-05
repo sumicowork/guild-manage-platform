@@ -94,9 +94,16 @@ export function ViolationDialog({
     if (!globalTemplate) return;
     const reason = reasons.find((r) => r.id === Number(selectedReasonId));
     if (!reason) return;
-    const muteText = muteEnabled
-      ? `并对您的账号作【${muteDuration === 'custom' ? (customHours || '24') + '小时' : muteDuration}禁言】处理。`
+
+    const muteLabelMap: Record<string, string> = {
+      '1h': '1小时', '12h': '12小时', '24h': '1天',
+      '7d': '7天', '30d': '30天', 'permanent': '永久',
+    };
+    const muteLabel = muteEnabled
+      ? (muteLabelMap[muteDuration] || (customHours || '24') + '小时')
       : '';
+    const muteText = muteLabel ? `并对您的账号作【${muteLabel}禁言】处理。` : '';
+
     const content = globalTemplate
       .replace(/\{违规原因\}/g, reason.name)
       .replace(/\{禁言处理\}/g, muteText);
