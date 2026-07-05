@@ -222,13 +222,9 @@ export default function MembersPage() {
             </Badge>
           ))}
           <DropdownMenu>
-            <DropdownMenuTrigger
-              render={(props) => (
-                <Button {...props} variant="ghost" size="icon-xs" onClick={(e) => e.stopPropagation()}>
-                  <Plus className="size-3" />
-                </Button>
-              )}
-            />
+            <DropdownMenuTrigger className="inline-flex items-center justify-center rounded-md p-1 hover:bg-gray-100" onClick={(e) => e.stopPropagation()}>
+              <Plus className="size-3" />
+            </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               <DropdownMenuLabel>添加标签</DropdownMenuLabel>
               <DropdownMenuSeparator />
