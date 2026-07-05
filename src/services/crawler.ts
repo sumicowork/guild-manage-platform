@@ -414,7 +414,12 @@ export async function runFullCrawl(
 
     log(taskId, `Phase 1 complete: ${stats.feedsTotal} feeds in ${pageCount} pages`);
 
-    // ── Phase 2: Comments ──
+    // ── Phase 2+3+4: Comments, Details, Members (parallel — different CLI commands, independent rate limits) ──
+    log(taskId, "Phase 2+3+4: Launching comments, details, and members in parallel...");
+
+    await Promise.all([
+      // Phase 2: Comments
+      (async () => {
     log(taskId, "Phase 2: Fetching comments...");
     for (let i = 0; i < allFeedIds.length; i++) {
       checkAbort(signal, taskId);
@@ -477,8 +482,10 @@ export async function runFullCrawl(
     }
 
     log(taskId, `Phase 2 complete: ${stats.commentsTotal} comments`);
+      })(),
 
-    // ── Phase 3: Details ──
+      // Phase 3: Details
+      (async () => {
     log(taskId, "Phase 3: Fetching feed details...");
     for (let i = 0; i < allFeedIds.length; i++) {
       const feedId = allFeedIds[i];
@@ -507,8 +514,10 @@ export async function runFullCrawl(
     }
 
     log(taskId, `Phase 3 complete: ${stats.detailsTotal} details`);
+      })(),
 
-    // ── Phase 4: Members ──
+      // Phase 4: Members
+      (async () => {
     log(taskId, "Phase 4: Fetching members...");
     let memberCursor = "";
     let memberPages = 0;
@@ -537,6 +546,10 @@ export async function runFullCrawl(
     }
 
     log(taskId, `Phase 4 complete: ${stats.membersTotal} members`);
+      })(),
+    ]);
+
+    log(taskId, `Phases 2+3+4 complete`);
 
     // Final stats
     await updateTaskStats(taskId, { ...stats, phase: "completed" });

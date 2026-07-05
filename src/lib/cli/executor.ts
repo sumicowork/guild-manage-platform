@@ -22,7 +22,7 @@ let _global153Count = 0;
 
 // ── 请求间隔 ─────────────────────────────────────────────
 // 与 .env.example 对齐：默认 1500ms（生产环境可通过 env 覆盖）
-const REQUEST_DELAY_MS = Number(process.env.CLI_REQUEST_DELAY_MS) || 1500;
+const REQUEST_DELAY_MS = Number(process.env.CLI_REQUEST_DELAY_MS) || 300;
 let lastCallTime = 0;
 
 // ── 身份池缓存（避免每次调用都查 DB）────────────────────────
