@@ -1,43 +1,47 @@
 import { crawlEvents } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export async function GET() {
-  const encoder = new TextEncoder();
+  let cleanup: (() => void) | null = null;
 
   const stream = new ReadableStream({
     start(controller) {
-      const send = (event: string, data: unknown) => {
+      const encoder = new TextEncoder();
+      const send = (event: string, data: string) => {
         try {
-          const body = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-          controller.enqueue(encoder.encode(body));
-        } catch { /* connection closed */ }
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${data}\n\n`));
+        } catch { /* closed */ }
       };
 
-      const onUpdate = (payload: unknown) => send("update", payload);
-      const onStatus = (payload: unknown) => send("status", payload);
+      const onUpdate = (payload: { taskId: string; stats: unknown }) => send("update", JSON.stringify(payload));
+      const onStatus = (payload: { taskId: string; status: string }) => send("status", JSON.stringify(payload));
 
       crawlEvents.on("update", onUpdate);
       crawlEvents.on("status", onStatus);
 
-      // Heartbeat every 15s — also detects client disconnect when enqueue throws
+      // Initial connection confirmation
+      send("connected", "{}");
+
       const heartbeat = setInterval(() => {
-        try { controller.enqueue(encoder.encode(": hb\n\n")); } catch { cleanup(); }
+        try { controller.enqueue(encoder.encode(": hb\n\n")); } catch { cleanup?.(); }
       }, 15000);
 
-      function cleanup() {
+      cleanup = () => {
         clearInterval(heartbeat);
         crawlEvents.off("update", onUpdate);
         crawlEvents.off("status", onStatus);
-      }
+      };
     },
   });
 
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 }

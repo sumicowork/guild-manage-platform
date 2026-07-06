@@ -319,20 +319,10 @@ export default function CrawlPage() {
   // SSE: live updates from server, no polling needed
   useEffect(() => {
     const es = new EventSource('/api/crawl/stream');
-    es.onmessage = () => {}; // ignore heartbeats
-    es.addEventListener('update', (e) => {
-      const { taskId } = JSON.parse(e.data);
-      // Re-fetch full list — broader context, simpler than diffing
-      fetchTasks();
-    });
-    es.addEventListener('status', (e) => {
-      const { taskId, status } = JSON.parse(e.data);
-      // Status change (started/completed/failed) → refresh
-      fetchTasks();
-    });
-    es.onerror = () => {
-      // EventSource will auto-reconnect
-    };
+    es.addEventListener('connected', () => { console.log('[Live] SSE connected'); });
+    es.addEventListener('update', () => { fetchTasks(); });
+    es.addEventListener('status', () => { fetchTasks(); });
+    es.onerror = () => { console.log('[Live] SSE error, will reconnect'); };
     return () => es.close();
   }, [fetchTasks]);
 
