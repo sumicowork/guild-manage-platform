@@ -748,12 +748,9 @@ export async function runUpdateCrawl(
   try {
     // ── Phase 1: Scan feeds for changes ──
     log(taskId, "Phase 1: Scanning feeds for changes...");
+    const MAX_SCAN_PAGES = 6; // 增量最多扫 6 页 (3000 条)，对齐 Python 原版
     recordPhaseStart("scan");
     recordPhaseTotal("scan", MAX_SCAN_PAGES);
-    let cursor = "";
-    let consecutiveCleanPages = 0;
-    let pageCount = 0;
-    const MAX_SCAN_PAGES = 6; // 增量最多扫 6 页 (3000 条)，对齐 Python 原版
     const changedFeedIds: string[] = [];
     const allSeenFeedIds = new Set<string>();
     const feedChannelMap: Record<string, string> = {}; // feed_id → channel_id
