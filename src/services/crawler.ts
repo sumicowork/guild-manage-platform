@@ -1120,6 +1120,10 @@ export async function runMemberCrawl(
     const t = stats.timing[phase];
     if (t) { t.calls++; if (current != null) t.current = current; }
   };
+  const recordPhaseTotal = (phase: string, total: number) => {
+    const t = stats.timing[phase];
+    if (t) t.total = total;
+  };
   const recordPhaseEnd = (phase: string) => {
     const t = stats.timing[phase];
     if (t) { t.ended = Date.now(); t.endedISO = new Date().toISOString(); }
