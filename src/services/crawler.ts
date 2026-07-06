@@ -472,12 +472,11 @@ export async function runFullCrawl(
       }
 
       pageCount++;
-      if (pageCount >= 1) { // every page
-        log(taskId, `Feeds: ${stats.feedsTotal} processed (page ${pageCount})`);
-        logPhaseSpeed("feeds", stats.feedsTotal);
         await updateTaskStats(taskId, { ...stats, phase: "feeds" });
-      }
-
+        if (pageCount % 10 === 0) {
+          log(taskId, `Feeds: ${stats.feedsTotal} processed (page ${pageCount})`);
+          logPhaseSpeed("feeds", stats.feedsTotal);
+        }
       if (!page.nextCursor) break;
       cursor = page.nextCursor;
     }
@@ -550,10 +549,10 @@ export async function runFullCrawl(
         console.error(`[Crawler] Failed to fetch comments for feed ${feedId}:`, err);
       }
 
-      if ((i + 1) % 10 === 0) {
+      await updateTaskStats(taskId, { ...stats, phase: "comments" });
+      if ((i + 1) % 50 === 0) {
         log(taskId, `Comments: ${stats.commentsTotal} from ${i + 1}/${allFeedIds.length} feeds`);
         logPhaseSpeed("comments", i + 1);
-        await updateTaskStats(taskId, { ...stats, phase: "comments" });
       }
     }
 
@@ -587,10 +586,10 @@ export async function runFullCrawl(
         console.error(`[Crawler] Failed to fetch detail for feed ${feedId}:`, err);
       }
 
-      if ((i + 1) % 5 === 0) {
+      await updateTaskStats(taskId, { ...stats, phase: "details" });
+      if ((i + 1) % 50 === 0) {
         log(taskId, `Details: ${stats.detailsTotal}/${i + 1} feeds`);
         logPhaseSpeed("details", i + 1);
-        await updateTaskStats(taskId, { ...stats, phase: "details" });
       }
     }
 
@@ -614,6 +613,7 @@ export async function runFullCrawl(
           await upsertMember(member);
           recordPhaseCall("members", stats.membersTotal + 1);
           stats.membersTotal++;
+          await updateTaskStats(taskId, { ...stats, phase: "members" });
         } catch (err) {
           stats.errors++;
           console.error(`[Crawler] Failed to upsert member ${member.tinyid}:`, err);
@@ -621,10 +621,9 @@ export async function runFullCrawl(
       }
 
       memberPages++;
-      if (memberPages >= 1) { // every page
+      if (memberPages % 5 === 0) {
         log(taskId, `Members: ${stats.membersTotal} (page ${memberPages})`);
         logPhaseSpeed("members", stats.membersTotal);
-        await updateTaskStats(taskId, { ...stats, phase: "members" });
       }
 
       if (!memberPage.nextPos) break;
@@ -1162,6 +1161,7 @@ export async function runMemberCrawl(
           });
           await upsertMember(member);
           stats.membersTotal++;
+          await updateTaskStats(taskId, { ...stats, phase: "members" });
           if (!existing) stats.newMembers++;
         } catch (err) {
           stats.errors++;
@@ -1171,9 +1171,8 @@ export async function runMemberCrawl(
 
       recordPhaseCall("members", stats.membersTotal);
       pageCount++;
-      if (pageCount >= 1) { // every page
+      if (pageCount % 5 === 0) {
         log(taskId, `Members: ${stats.membersTotal} (page ${pageCount})`);
-        await updateTaskStats(taskId, { ...stats, phase: "members" });
       }
 
       if (!page.nextPos) break;
