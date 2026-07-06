@@ -122,99 +122,85 @@ function fmtDuration(sec: number): string {
 }
 
 function LiveCrawlDashboard({ tasks }: { tasks: CrawlTask[] }) {
-  const running = tasks.filter(t => t.status === 'running');
-  // Show running tasks, or if none, the most recent completed/failed one
-  const display = running.length > 0 ? running : (() => {
-    const recent = tasks.filter(t => t.status === 'completed' || t.status === 'failed')
-      .sort((a, b) => b.id - a.id);
-    return recent.length > 0 ? [recent[0]] : [];
-  })();
+  const types = ['full', 'update', 'members'] as const;
+  const typeIcons: Record<string, string> = { full: '全量爬取', update: '增量更新', members: '爬取成员' };
 
-  if (display.length === 0) return null;
+  // Get latest task per type (any status)
+  const latestByType = new Map<string, CrawlTask>();
+  for (const t of tasks) {
+    const existing = latestByType.get(t.type);
+    if (!existing || t.id > existing.id) latestByType.set(t.type, t);
+  }
 
   return (
-    <div className="space-y-3">
-      {display.map(task => {
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+      {types.map(type => {
+        const task = latestByType.get(type);
+        if (!task) return <Card key={type} className="border-gray-100"><CardContent className="p-4 text-center text-sm text-gray-400">{typeIcons[type]}</CardContent></Card>;
+
         const stats = task.stats || {};
         const timing = stats.timing as Record<string, { started: number; ended?: number; calls: number; current?: number; total?: number }> | undefined;
         const wallTime = stats.wallTimeSec as number | undefined
           || (timing ? Math.round((Object.values(timing).reduce((max, t) => Math.max(max, (t.ended || Date.now()) - t.started), 0)) / 1000) : undefined);
         const rateLimits = stats.rateLimits as Record<string, number> | undefined;
-        const phase = stats.phase as string || '';
         const elapsed = task.startedAt ? Math.round((Date.now() - new Date(task.startedAt).getTime()) / 1000) : 0;
         const total153 = rateLimits ? Object.values(rateLimits).reduce((a, b) => a + b, 0) : 0;
-
-        // Compute progress for full crawl
-        const feedsMax = stats.feedsTotal || 0;
-        const detailProgress = feedsMax > 0 ? (stats.detailsTotal || 0) / feedsMax * 100 : 0;
-        const commentProgress = stats.commentRefTotal || (stats.commentsTotal && timing?.comments?.ended ? 100 : timing ? 99 : 0);
-
         const isRunning = task.status === 'running';
-        const statusColor = isRunning ? 'border-blue-200 bg-gradient-to-r from-blue-50/50 to-white' :
-                            task.status === 'failed' ? 'border-red-200 bg-gradient-to-r from-red-50/50 to-white' :
-                            'border-green-200 bg-gradient-to-r from-green-50/50 to-white';
-        const statusBadge = isRunning ? '运行中' : task.status === 'failed' ? '失败' : '已完成';
-        const badgeColor = isRunning ? 'text-blue-600' : task.status === 'failed' ? 'text-red-600' : 'text-green-600';
-        const dotColor = isRunning ? 'bg-blue-500 animate-pulse' : task.status === 'failed' ? 'bg-red-500' : 'bg-green-500';
+        const isFailed = task.status === 'failed';
 
         return (
-          <Card key={task.id} className={statusColor}>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <span className={`inline-block size-2 rounded-full ${dotColor}`} />
-                {typeLabels[task.type] || task.type} · <span className={badgeColor}>{statusBadge}</span>
-                <span className="ml-auto text-sm font-normal text-gray-500">
-                  {isRunning ? `已运行 ${fmtDuration(elapsed)}` : (wallTime ? `总耗时 ${fmtDuration(wallTime)}` : '')}
-                  {total153 > 0 && <span className="ml-2 text-orange-500 font-medium">⚠ 153×{total153}</span>}
+          <Card key={type} className={
+            isRunning ? 'border-blue-200 bg-gradient-to-r from-blue-50/50 to-white' :
+            isFailed ? 'border-red-200 bg-gradient-to-r from-red-50/50 to-white' :
+            'border-green-200 bg-gradient-to-r from-green-50/50 to-white'
+          }>
+            <CardHeader className="pb-1.5">
+              <CardTitle className="flex items-center gap-1.5 text-sm">
+                <span className={`inline-block size-2 rounded-full ${isRunning ? 'bg-blue-500 animate-pulse' : isFailed ? 'bg-red-500' : 'bg-green-500'}`} />
+                <span className="text-gray-700">{typeIcons[type] || type}</span>
+                <span className={`text-xs font-normal ml-1 ${isRunning ? 'text-blue-600' : isFailed ? 'text-red-600' : 'text-green-600'}`}>
+                  {isRunning ? '运行中' : isFailed ? '失败' : '已完成'}
+                </span>
+                <span className="ml-auto text-xs font-normal text-gray-400">
+                  {isRunning ? fmtDuration(elapsed) : (wallTime ? fmtDuration(wallTime) : '')}
+                  {total153 > 0 && <span className="ml-1 text-orange-500">⚠153×{total153}</span>}
                 </span>
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {/* Phase progress bars */}
+            <CardContent className="space-y-1.5">
               {timing && Object.entries(timing).map(([p, t]) => {
                 const dur = ((t.ended || Date.now()) - t.started) / 1000;
                 const avgMs = t.calls > 0 ? dur * 1000 / t.calls : 0;
-                const cpm = dur > 0 ? (t.calls / dur * 60 | 0) : 0;
                 const done = !!t.ended;
                 const hasProgress = (t.total ?? 0) > 0 && t.current != null;
                 const pct = done ? 100 : (hasProgress ? Math.min(99, Math.round(t.current! / t.total! * 100)) : Math.min(99, (t.calls % 1000) / 10));
                 return (
-                  <div key={p} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-gray-600">
-                        {phaseLabels[p] || p}
-                        {done && <span className="ml-1 text-gray-400 font-normal">{fmtDuration(dur)}</span>}
-                      </span>
-                      <span className="font-mono text-gray-500">
-                        {done ? (
-                          <span className="text-green-600">✓ {t.calls}次 · {avgMs.toFixed(0)}ms/次 · {cpm}/min</span>
-                        ) : (
-                          <span className="text-blue-600">{t.calls}次 · {avgMs.toFixed(0)}ms</span>
-                        )}
+                  <div key={p} className="space-y-0.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-gray-500">{phaseLabels[p] || p}</span>
+                      <span className="font-mono text-gray-400">
+                        {done ? `✓ ${t.calls}次 ${avgMs.toFixed(0)}ms` : `${t.calls}次 ${avgMs.toFixed(0)}ms`}
                       </span>
                     </div>
-                    <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-1000 ${done ? 'bg-green-400' : isRunning ? 'bg-blue-400 animate-pulse' : 'bg-red-400'}`}
-                        style={{ width: `${pct}%` }}
-                      />
+                    <div className="h-1 rounded-full bg-gray-100 overflow-hidden">
+                      <div className={`h-full rounded-full transition-all ${done ? 'bg-green-400' : isRunning ? 'bg-blue-400' : 'bg-red-400'}`}
+                        style={{ width: `${pct}%` }} />
                     </div>
                   </div>
                 );
               })}
-
-              {/* Summary row */}
-              <div className="flex flex-wrap gap-3 text-xs text-gray-500 pt-1.5 border-t border-gray-100">
-                {stats.feedsTotal != null && <span>帖子 <b className="text-gray-700">{stats.feedsTotal}</b></span>}
-                {stats.commentsTotal != null && <span>评论 <b className="text-gray-700">{stats.commentsTotal}</b></span>}
-                {stats.detailsTotal != null && <span>详情 <b className="text-gray-700">{stats.detailsTotal}</b></span>}
-                {stats.membersTotal != null && <span>成员 <b className="text-gray-700">{stats.membersTotal}</b></span>}
-                {stats.newFeeds != null && <span>新帖 <b className="text-green-600">{stats.newFeeds}</b></span>}
-                {stats.updatedFeeds != null && <span>更新 <b className="text-blue-600">{stats.updatedFeeds}</b></span>}
-                {stats.commentsAdded != null && <span>新评论 <b className="text-cyan-600">{stats.commentsAdded}</b></span>}
-                {stats.newMembers != null && <span>新成员 <b className="text-green-600">{stats.newMembers}</b></span>}
-                {stats.autoActions > 0 && <span className="text-purple-500">自动操作 <b>{stats.autoActions}</b></span>}
-                {stats.errors > 0 && <span className="text-red-500">错误 <b>{stats.errors}</b></span>}
+              {/* Compact summary */}
+              <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-gray-400 pt-1 border-t border-gray-50">
+                {stats.feedsTotal != null && <span>帖子<b className="text-gray-600 ml-0.5">{stats.feedsTotal}</b></span>}
+                {stats.commentsTotal != null && <span>评论<b className="text-gray-600 ml-0.5">{stats.commentsTotal}</b></span>}
+                {stats.detailsTotal != null && <span>详情<b className="text-gray-600 ml-0.5">{stats.detailsTotal}</b></span>}
+                {stats.membersTotal != null && <span>成员<b className="text-gray-600 ml-0.5">{stats.membersTotal}</b></span>}
+                {stats.newFeeds != null && <span>新帖<b className="text-green-600 ml-0.5">{stats.newFeeds}</b></span>}
+                {stats.updatedFeeds != null && <span>更新<b className="text-blue-600 ml-0.5">{stats.updatedFeeds}</b></span>}
+                {stats.commentsAdded != null && <span>新评<b className="text-cyan-600 ml-0.5">{stats.commentsAdded}</b></span>}
+                {stats.newMembers != null && <span>新成员<b className="text-green-600 ml-0.5">{stats.newMembers}</b></span>}
+                {stats.autoActions > 0 && <span>自动<b className="text-purple-500 ml-0.5">{stats.autoActions}</b></span>}
+                {stats.errors > 0 && <span className="text-red-500">错误<b className="ml-0.5">{stats.errors}</b></span>}
               </div>
             </CardContent>
           </Card>
@@ -331,17 +317,11 @@ export default function CrawlPage() {
     }).catch(() => {});
   }, [fetchTasks, fetchSchedule]);
 
-  // Auto-refresh when a task is running
+  // Always poll: fast (500ms) when running, slow (3s) when idle
   useEffect(() => {
     const hasRunning = tasks.some((t) => t.status === 'running');
-    if (hasRunning) {
-      intervalRef.current = setInterval(fetchTasks, 500);
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    }
+    const interval = hasRunning ? 500 : 3000;
+    intervalRef.current = setInterval(fetchTasks, interval);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
