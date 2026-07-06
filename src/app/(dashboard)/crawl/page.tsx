@@ -123,7 +123,14 @@ function fmtDuration(sec: number): string {
 
 function LiveCrawlDashboard({ tasks }: { tasks: CrawlTask[] }) {
   const running = tasks.filter(t => t.status === 'running');
-  if (running.length === 0) return null;
+  // Show running tasks, or if none, the most recent completed/failed one
+  const display = running.length > 0 ? running : (() => {
+    const recent = tasks.filter(t => t.status === 'completed' || t.status === 'failed')
+      .sort((a, b) => b.id - a.id);
+    return recent.length > 0 ? [recent[0]] : [];
+  })();
+
+  if (display.length === 0) return null;
 
   return (
     <div className="space-y-3">
@@ -141,14 +148,22 @@ function LiveCrawlDashboard({ tasks }: { tasks: CrawlTask[] }) {
         const detailProgress = feedsMax > 0 ? (stats.detailsTotal || 0) / feedsMax * 100 : 0;
         const commentProgress = stats.commentRefTotal || (stats.commentsTotal && timing?.comments?.ended ? 100 : timing ? 99 : 0);
 
+        const isRunning = task.status === 'running';
+        const statusColor = isRunning ? 'border-blue-200 bg-gradient-to-r from-blue-50/50 to-white' :
+                            task.status === 'failed' ? 'border-red-200 bg-gradient-to-r from-red-50/50 to-white' :
+                            'border-green-200 bg-gradient-to-r from-green-50/50 to-white';
+        const statusBadge = isRunning ? '运行中' : task.status === 'failed' ? '失败' : '已完成';
+        const badgeColor = isRunning ? 'text-blue-600' : task.status === 'failed' ? 'text-red-600' : 'text-green-600';
+        const dotColor = isRunning ? 'bg-blue-500 animate-pulse' : task.status === 'failed' ? 'bg-red-500' : 'bg-green-500';
+
         return (
-          <Card key={task.id} className="border-blue-200 bg-gradient-to-r from-blue-50/50 to-white">
+          <Card key={task.id} className={statusColor}>
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-base">
-                <span className="inline-block size-2 rounded-full bg-blue-500 animate-pulse" />
-                {typeLabels[task.type] || task.type} · 运行中
+                <span className={`inline-block size-2 rounded-full ${dotColor}`} />
+                {typeLabels[task.type] || task.type} · <span className={badgeColor}>{statusBadge}</span>
                 <span className="ml-auto text-sm font-normal text-gray-500">
-                  已运行 {fmtDuration(elapsed)}
+                  {isRunning ? `已运行 ${fmtDuration(elapsed)}` : (wallTime ? `总耗时 ${fmtDuration(wallTime)}` : '')}
                   {total153 > 0 && <span className="ml-2 text-orange-500 font-medium">⚠ 153×{total153}</span>}
                 </span>
               </CardTitle>
@@ -159,6 +174,8 @@ function LiveCrawlDashboard({ tasks }: { tasks: CrawlTask[] }) {
                 const dur = ((t.ended || Date.now()) - t.started) / 1000;
                 const avgMs = t.calls > 0 ? dur * 1000 / t.calls : 0;
                 const done = !!t.ended;
+                const hasProgress = t.total > 0 && t.current != null;
+                const pct = hasProgress ? Math.min(100, Math.round(t.current / t.total * 100)) : (done ? 100 : Math.min(99, (t.calls % 1000) / 10));
                 return (
                   <div key={p} className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
@@ -167,14 +184,14 @@ function LiveCrawlDashboard({ tasks }: { tasks: CrawlTask[] }) {
                         {done ? (
                           <span className="text-green-600">✓ {t.calls}次 · {avgMs.toFixed(0)}ms</span>
                         ) : (
-                          <span className="text-blue-600">{t.calls}次 · {avgMs.toFixed(0)}ms/次 · {phase === p ? '进行中' : '排队'}</span>
+                          <span className="text-blue-600">{t.calls}次 · {avgMs.toFixed(0)}ms/次{hasProgress ? ` · ${pct}%` : ''}{phase === p ? ' · 进行中' : ''}</span>
                         )}
                       </span>
                     </div>
                     <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
                       <div
-                        className={`h-full rounded-full transition-all duration-1000 ${done ? 'bg-green-400' : 'bg-blue-400 animate-pulse'}`}
-                        style={{ width: `${done ? 100 : Math.min(99, (t.calls % 1000) / 10)}%` }}
+                        className={`h-full rounded-full transition-all duration-1000 ${done ? 'bg-green-400' : isRunning ? 'bg-blue-400 animate-pulse' : 'bg-gray-300'}`}
+                        style={{ width: `${pct}%` }}
                       />
                     </div>
                   </div>
