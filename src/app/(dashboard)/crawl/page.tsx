@@ -319,9 +319,9 @@ export default function CrawlPage() {
   // SSE: live updates from server, no polling needed
   useEffect(() => {
     const es = new EventSource('/api/crawl/stream');
-    es.addEventListener('connected', () => { console.log('[Live] SSE connected'); });
-    es.addEventListener('update', () => { console.log('[Live] update event'); fetchTasks(); });
-    es.addEventListener('status', () => { console.log('[Live] status event'); fetchTasks(); });
+    es.addEventListener('connected', () => {});
+    es.addEventListener('update', () => { fetchTasks(); });
+    es.addEventListener('status', () => { fetchTasks(); });
     es.onerror = () => { console.log('[Live] SSE error, will reconnect'); };
     return () => es.close();
   }, [fetchTasks]);
