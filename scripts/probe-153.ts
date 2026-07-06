@@ -21,6 +21,9 @@ import "dotenv/config";
 // ── Config ──
 
 const GUILD_ID = process.env.GUILD_ID || "";
+const TEST_FEED_ID = process.env.PROBE_FEED_ID || "";  // 提供一条有评论/详情的帖子 ID
+const IDENTITY_ID = BigInt(process.env.PROBE_IDENTITY_ID || "1");  // 管理员身份 ID
+
 const STEPS = 300;
 const HIT_COOLDOWN_S = 30 * 60;
 const LEVEL_COOLDOWN_S = 20 * 60;
@@ -29,8 +32,7 @@ const START_DELAY_MS = 2000;
 const STEP_MS = 200;
 const MIN_DELAY_MS = 200;
 
-// CLI path for exec (shell-compatible)
-const CLI_CMD = "tencent-channel-cli"; // works in Git Bash / Linux PATH
+const CLI_CMD = "tencent-channel-cli";
 
 // ── Logger ──
 
@@ -46,27 +48,9 @@ function log(msg: string) {
   fs.appendFileSync(logPath, line + "\n");
 }
 
-// ── Identity ──
-
-import { PrismaClient } from "../src/generated/prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-
-const prisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
-});
-
-async function getIdentity() {
-  const ident = await prisma.adminIdentity.findFirst({
-    select: { id: true, nickname: true },
-    orderBy: { id: "asc" },
-  });
-  if (!ident) throw new Error("No active identity found");
-  return ident;
-}
-
 // ── CLI call ──
 
-// Build env with credentials for a specific identity
+// Credential env: points CLI to ~/.qqcli/credentials/{id}/credentials.env
 import { buildCliEnv } from "../src/lib/cli/credentials";
 
 async function callCli(domain: string, action: string, params: string[], identityId: bigint): Promise<{ ok: boolean; code?: number; stderr?: string }> {
@@ -146,22 +130,16 @@ async function main() {
   log(`║ STEP: ${STEP_MS}ms`);
   log("╚══════════════════════════════════════════╝");
 
-  const identity = await getIdentity();
-  log(`Identity: #${identity.id} (${identity.nickname})`);
+  if (!GUILD_ID) throw new Error("GUILD_ID not set in .env");
+  if (!TEST_FEED_ID) throw new Error("PROBE_FEED_ID not set in .env — provide a feed with comments");
 
-  // Find a test feed
-  const feed = await prisma.feed.findFirst({
-    where: { comment_count: { gte: 1 } },
-    select: { feed_id: true, comment_count: true },
-    orderBy: { comment_count: "desc" },
-  });
-  if (!feed) throw new Error("No feed with comments found");
-  const feedId = feed.feed_id;
-  log(`Test feed: ${feedId} (${feed.comment_count} comments)`);
+  log(`Guild: ${GUILD_ID}`);
+  log(`Identity: #${IDENTITY_ID} (see ~/.qqcli/credentials/${IDENTITY_ID}/credentials.env)`);
+  log(`Test feed: ${TEST_FEED_ID}`);
 
   // Pre-flight: test CLI works
   log("Pre-flight check...");
-  const pf = await callCli("feed", "get-feed-comments", [`--feed-id=${feedId}`, `--guild-id=${GUILD_ID}`, "--count=1", "--reply-list-num=0"], identity.id);
+  const pf = await callCli("feed", "get-feed-comments", [`--feed-id=${TEST_FEED_ID}`, `--guild-id=${GUILD_ID}`, "--count=1", "--reply-list-num=0"], IDENTITY_ID);
   if (!pf.ok) {
     log(`FATAL: CLI test failed: code=${pf.code} ${pf.stderr?.slice(0, 200)}`);
     process.exit(1);
@@ -170,8 +148,8 @@ async function main() {
 
   // Test phases
   const phases = [
-    { name: "getFeedComments", domain: "feed", action: "get-feed-comments", params: [`--feed-id=${feedId}`, `--guild-id=${GUILD_ID}`, "--count=1", "--reply-list-num=0"] },
-    { name: "getFeedDetail",   domain: "feed", action: "get-feed-detail",   params: [`--feed-id=${feedId}`, `--guild-id=${GUILD_ID}`] },
+    { name: "getFeedComments", domain: "feed", action: "get-feed-comments", params: [`--feed-id=${TEST_FEED_ID}`, `--guild-id=${GUILD_ID}`, "--count=1", "--reply-list-num=0"] },
+    { name: "getFeedDetail",   domain: "feed", action: "get-feed-detail",   params: [`--feed-id=${TEST_FEED_ID}`, `--guild-id=${GUILD_ID}`] },
   ];
 
   for (const phase of phases) {
@@ -192,7 +170,7 @@ async function main() {
           await cooldown(HIT_COOLDOWN_S, `撞后冷却 (153 confirm #${attempt})`);
         }
 
-        const result = await probe(phase.domain, phase.action, phase.params, identity.id, delayMs, STEPS);
+        const result = await probe(phase.domain, phase.action, phase.params, IDENTITY_ID, delayMs, STEPS);
         log(`  Result: OK=${result.ok} 153=${result.hit153} other=${result.other}`);
 
         if (result.hit153 === 0) {
@@ -236,11 +214,11 @@ async function main() {
   log("\n═══════════════════════════════════════════");
   log("Probe complete. Log: " + logPath);
   log("═══════════════════════════════════════════");
-  await prisma.$disconnect();
+  // cleanup
 }
 
 main().catch(async (err) => {
   log(`FATAL: ${err instanceof Error ? err.message : String(err)}`);
-  await prisma.$disconnect();
+  // cleanup
   process.exit(1);
 });
