@@ -52,3 +52,4 @@ login.json
 *login.json
 debug.log
 logs/
+scripts/probe-153.ts
