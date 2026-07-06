@@ -12,28 +12,24 @@
  * 日志: logs/probe-153-YYYYMMDD-HHmmss.log
  */
 
-import { execFile } from "child_process";
+import { exec } from "child_process";
 import { promisify } from "util";
 import * as fs from "fs";
-import * as path from "path";
 import "dotenv/config";
 
 // ── Config ──
 
-const GUILD_ID = process.env.GUILD_ID || ""; // must be set in .env
-const STEPS = 300;                       // 每级调用次数
-const HIT_COOLDOWN_S = 30 * 60;         // 撞 153 后冷却（秒）
-const LEVEL_COOLDOWN_S = 20 * 60;       // 级间冷却（秒）
-const HIT_CONFIRM = 5;                  // 同一延迟连续撞 N 次才放弃
-const START_DELAY_MS = 2000;            // 起始延迟（毫秒）
-const STEP_MS = 200;                    // 步长（毫秒）
-const MIN_DELAY_MS = 200;               // 最低延迟（毫秒）
+const GUILD_ID = process.env.GUILD_ID || "";
+const STEPS = 300;
+const HIT_COOLDOWN_S = 30 * 60;
+const LEVEL_COOLDOWN_S = 20 * 60;
+const HIT_CONFIRM = 5;
+const START_DELAY_MS = 2000;
+const STEP_MS = 200;
+const MIN_DELAY_MS = 200;
 
-const CLI_BIN = (() => {
-  const base = path.resolve(process.cwd(), "node_modules", ".bin", "tencent-channel-cli");
-  if (process.platform === "win32" && fs.existsSync(base + ".cmd")) return base + ".cmd";
-  return base;
-})();
+// CLI path for exec (shell-compatible)
+const CLI_CMD = "tencent-channel-cli"; // works in Git Bash / Linux PATH
 
 // ── Logger ──
 
@@ -73,11 +69,12 @@ async function getIdentity() {
 import { buildCliEnv } from "../src/lib/cli/credentials";
 
 async function callCli(domain: string, action: string, params: string[], identityId: bigint): Promise<{ ok: boolean; code?: number; stderr?: string }> {
-  const env = buildCliEnv(identityId);
-  const args = [domain, action, ...params, "--json", "--yes"];
+  const env = { ...process.env, ...buildCliEnv(identityId) };
+  const paramStr = params.join(" ");
+  const cmd = `${CLI_CMD} ${domain} ${action} ${paramStr} --json --yes`;
   try {
-    const execFileAsync = promisify(execFile);
-    const { stdout, stderr } = await execFileAsync(CLI_BIN, args, {
+    const execAsync = promisify(exec);
+    const { stdout, stderr } = await execAsync(cmd, {
       maxBuffer: 100 * 1024 * 1024,
       timeout: 30_000,
       env,
@@ -154,17 +151,16 @@ async function main() {
   // Find a test feed
   const feed = await prisma.feed.findFirst({
     where: { comment_count: { gte: 1 } },
-    select: { feed_id: true, channel_id: true, comment_count: true },
+    select: { feed_id: true, comment_count: true },
     orderBy: { comment_count: "desc" },
   });
   if (!feed) throw new Error("No feed with comments found");
   const feedId = feed.feed_id;
-  const channelId = feed.channel_id || "0";
   log(`Test feed: ${feedId} (${feed.comment_count} comments)`);
 
   // Pre-flight: test CLI works
   log("Pre-flight check...");
-  const pf = await callCli("feed", "comments", [feedId, "-c", channelId, "-g", GUILD_ID, "-l", "1"], identity.id);
+  const pf = await callCli("feed", "get-feed-comments", [`--feed-id=${feedId}`, `--guild-id=${GUILD_ID}`, "--count=1", "--reply-list-num=0"], identity.id);
   if (!pf.ok) {
     log(`FATAL: CLI test failed: code=${pf.code} ${pf.stderr?.slice(0, 200)}`);
     process.exit(1);
@@ -173,8 +169,8 @@ async function main() {
 
   // Test phases
   const phases = [
-    { name: "getFeedComments", domain: "feed", action: "comments", params: [feedId, "-c", channelId, "-g", GUILD_ID, "-l", "1"] },
-    { name: "getFeedDetail",   domain: "feed", action: "detail",   params: [feedId, "-c", channelId, "-g", GUILD_ID] },
+    { name: "getFeedComments", domain: "feed", action: "get-feed-comments", params: [`--feed-id=${feedId}`, `--guild-id=${GUILD_ID}`, "--count=1", "--reply-list-num=0"] },
+    { name: "getFeedDetail",   domain: "feed", action: "get-feed-detail",   params: [`--feed-id=${feedId}`, `--guild-id=${GUILD_ID}`] },
   ];
 
   for (const phase of phases) {
