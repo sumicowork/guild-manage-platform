@@ -706,31 +706,30 @@ export async function runUpdateCrawl(
     timing: {} as Record<string, any>,
   };
 
-  const tStart = (phase: string, total?: number) => {
+  function tStart(phase: string, total?: number): void {
     const now = Date.now();
     stats.timing[phase] = { started: now, startedISO: new Date(now).toISOString(), calls: 0, current: 0, total: total ?? 0, lastLogTime: now, lastLogCount: 0 };
-  };
-  const tCall = (phase: string, current?: number) => {
+  }
+  function tCall(phase: string, current?: number): void {
     const t = stats.timing[phase]; if (!t) return;
     t.calls++; if (current != null) t.current = current;
-  };
-  const tEnd = (phase: string) => {
+  }
+  function tEnd(phase: string): void {
     const t = stats.timing[phase]; if (!t) return;
     t.ended = Date.now(); t.endedISO = new Date().toISOString();
     const dur = (t.ended - t.started) / 1000;
     const cpm = dur > 0 ? (t.calls / dur * 60 | 0) : 0;
     log(taskId, `[${phase}] done: ${t.calls} call(s) in ${dur.toFixed(0)}s (${cpm}/min)`);
-  };
-  const tSpeed = (phase: string, label: string) => {
+  }
+  function tSpeed(phase: string, label: string): void {
     const t = stats.timing[phase]; if (!t) return;
     const now = Date.now(); const elapsed = (now - t.lastLogTime) / 1000;
     if (elapsed < 5) return;
     const calls = t.calls - t.lastLogCount;
     log(taskId, `[${phase}] ${label} | ${calls} calls in ${elapsed.toFixed(0)}s → ${(calls / elapsed * 60).toFixed(0)} calls/min`);
     t.lastLogTime = now; t.lastLogCount = t.calls;
-  };
-
-  const tFinalize = () => {
+  }
+  function tFinalize(): void {
     const rl = getRateLimitStats(); resetRateLimitStats();
     stats.rateLimits = rl;
     let st = Infinity, et = 0;
@@ -739,7 +738,7 @@ export async function runUpdateCrawl(
       if (t.ended && t.ended > et) et = t.ended;
     }
     stats.wallTimeSec = Math.round((et - st) / 1000);
-  };
+  }
 
   // Load enabled auto-rules for real-time enforcement during crawl
   const autoRules = await prisma.autoRule.findMany({
@@ -1117,21 +1116,21 @@ export async function runMemberCrawl(
 
   const stats: Record<string, any> = { startedISO: new Date().toISOString(), wallTimeSec: 0, rateLimits: {} as Record<string, number>, membersTotal: 0, newMembers: 0, errors: 0, timing: {} as Record<string, any> };
 
-  const tStart = (phase: string) => {
+  function tStart(phase: string): void {
     const now = Date.now(); stats.timing[phase] = { started: now, startedISO: new Date(now).toISOString(), calls: 0, current: 0 };
-  };
-  const tCall = (phase: string, current?: number) => {
+  }
+  function tCall(phase: string, current?: number): void {
     const t = stats.timing[phase]; if (!t) return; t.calls++; if (current != null) t.current = current;
-  };
-  const tEnd = (phase: string) => {
+  }
+  function tEnd(phase: string): void {
     const t = stats.timing[phase]; if (!t) return; t.ended = Date.now(); t.endedISO = new Date().toISOString();
-  };
-  const tFinalize = () => {
+  }
+  function tFinalize(): void {
     const rl = getRateLimitStats(); resetRateLimitStats(); stats.rateLimits = rl;
     let st = Infinity, et = 0;
     for (const t of Object.values(stats.timing as Record<string, any>)) { if (t.started < st) st = t.started; if (t.ended && t.ended > et) et = t.ended; }
     stats.wallTimeSec = Math.round((et - st) / 1000);
-  };
+  }
 
   try {
     tStart("members");
