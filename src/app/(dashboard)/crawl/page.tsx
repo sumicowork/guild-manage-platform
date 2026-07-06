@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api-client';
 import { DataTable, Column } from '@/components/DataTable';
 import { Button } from '@/components/ui/button';
@@ -275,7 +275,6 @@ export default function CrawlPage() {
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [identities, setIdentities] = useState<AdminIdentity[]>([]);
   const [adminIdentityId, setAdminIdentityId] = useState<string>('');
 
@@ -317,15 +316,25 @@ export default function CrawlPage() {
     }).catch(() => {});
   }, [fetchTasks, fetchSchedule]);
 
-  // Always poll: fast (500ms) when running, slow (3s) when idle
+  // SSE: live updates from server, no polling needed
   useEffect(() => {
-    const hasRunning = tasks.some((t) => t.status === 'running');
-    const interval = hasRunning ? 500 : 3000;
-    intervalRef.current = setInterval(fetchTasks, interval);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+    const es = new EventSource('/api/crawl/stream');
+    es.onmessage = () => {}; // ignore heartbeats
+    es.addEventListener('update', (e) => {
+      const { taskId } = JSON.parse(e.data);
+      // Re-fetch full list — broader context, simpler than diffing
+      fetchTasks();
+    });
+    es.addEventListener('status', (e) => {
+      const { taskId, status } = JSON.parse(e.data);
+      // Status change (started/completed/failed) → refresh
+      fetchTasks();
+    });
+    es.onerror = () => {
+      // EventSource will auto-reconnect
     };
-  }, [tasks, fetchTasks]);
+    return () => es.close();
+  }, [fetchTasks]);
 
   const triggerTask = async (type: string) => {
     setTriggering(type);

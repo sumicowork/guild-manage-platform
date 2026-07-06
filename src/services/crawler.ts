@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { crawlEvents } from "@/lib/events";
 import {
   getGuildFeeds,
   getFeedComments,
@@ -78,6 +79,7 @@ async function updateTaskStats(
     where: { id: taskId },
     data: { stats: stats as any },
   });
+  crawlEvents.emit("update", { taskId: String(taskId), stats });
 }
 
 /** Update task status */
@@ -94,6 +96,7 @@ async function updateTaskStatus(
       error_log: errorLog,
     },
   });
+  crawlEvents.emit("status", { taskId: String(taskId), status, errorLog });
 }
 
 /** Extract text content from a comment/reply content object */
