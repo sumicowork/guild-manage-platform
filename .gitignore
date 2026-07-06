@@ -51,3 +51,4 @@ next-env.d.ts
 login.json
 *login.json
 debug.log
+logs/
