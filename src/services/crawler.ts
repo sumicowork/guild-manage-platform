@@ -8,6 +8,7 @@ import {
   movePost,
 } from "@/lib/cli/feed";
 import { getGuildMembers } from "@/lib/cli/member";
+import { getRateLimitStats, resetRateLimitStats } from "@/lib/cli/executor";
 import fs from "fs";
 import path from "path";
 
@@ -373,11 +374,12 @@ export async function runFullCrawl(
     detailsTotal: 0,
     membersTotal: 0,
     errors: 0,
-    timing: {} as Record<string, { started: number; ended?: number; calls: number; lastLogTime: number; lastLogCount: number }>,
+    timing: {} as Record<string, { started: number; startedISO: string; ended?: number; endedISO?: string; calls: number; lastLogTime: number; lastLogCount: number }>,
   };
 
   const recordPhaseStart = (phase: string) => {
-    stats.timing[phase] = { started: Date.now(), calls: 0, lastLogTime: Date.now(), lastLogCount: 0 };
+    const now = Date.now();
+    stats.timing[phase] = { started: now, startedISO: new Date(now).toISOString(), calls: 0, lastLogTime: now, lastLogCount: 0 };
   };
   const recordPhaseCall = (phase: string) => {
     const t = stats.timing[phase];
@@ -397,7 +399,7 @@ export async function runFullCrawl(
   };
   const recordPhaseEnd = (phase: string) => {
     const t = stats.timing[phase];
-    if (t) t.ended = Date.now();
+    if (t) { t.ended = Date.now(); t.endedISO = new Date().toISOString(); }
     const dur = t ? (t.ended! - t.started) / 1000 : 0;
     log(taskId, `[${phase}] done: ${t?.calls || 0} calls in ${dur.toFixed(0)}s (${(t?.calls || 0) / dur * 60 | 0} calls/min)`);
   };
@@ -611,14 +613,38 @@ export async function runFullCrawl(
 
     log(taskId, `Phases 2+3+4 complete`);
 
-    // ── Timing report ──
-    log(taskId, "=== Crawl Timing Report ===");
+    // ── Detailed timing report ──
+    const rlStats = getRateLimitStats();
+    resetRateLimitStats();
+    const total153 = Object.values(rlStats).reduce((a, b) => a + b, 0);
+
+    let overallStart = Infinity, overallEnd = 0;
+    for (const t of Object.values(stats.timing)) {
+      if (t.started < overallStart) overallStart = t.started;
+      if (t.ended && t.ended > overallEnd) overallEnd = t.ended;
+    }
+    const totalWall = (overallEnd - overallStart) / 1000;
+
+    log(taskId, `\n╔══════════════════════════════════════════════════╗`);
+    log(taskId, `║          全量爬取速度报告                         ║`);
+    log(taskId, `╠══════════════════════════════════════════════════╣`);
+    log(taskId, `║ 总耗时:     ${totalWall.toFixed(0)}s (${(totalWall / 3600).toFixed(1)}h)`);
+    log(taskId, `║ 153 限流:   ${total153} 次`);
+    log(taskId, `╠══════════════════════╤═══════╤════════╤══════════╣`);
+    log(taskId, `║ 阶段                  │ 调用次数  │ 耗时(s) │ avg(ms)   ║`);
+    log(taskId, `╟──────────────────────┼───────┼────────┼──────────╢`);
     for (const [phase, t] of Object.entries(stats.timing)) {
       const dur = ((t.ended || Date.now()) - t.started) / 1000;
-      const cpm = dur > 0 ? (t.calls / dur * 60 | 0) : 0;
-      log(taskId, `  ${phase}: ${t.calls} calls in ${dur.toFixed(0)}s → ${cpm} calls/min`);
+      const avgMs = t.calls > 0 ? (dur * 1000 / t.calls).toFixed(0) : '-';
+      const label = { feeds: '拉帖子列表', comments: '拉评论(+回复)', details: '拉帖子详情', members: '拉成员' }[phase] || phase;
+      const startTime = t.startedISO?.slice(11, 19) || '-';
+      const endTime = t.endedISO?.slice(11, 19) || '-';
+      log(taskId, `║ ${startTime}→${endTime} ${label.padEnd(12)} │ ${String(t.calls).padStart(5)} │ ${dur.toFixed(0).padStart(6)} │ ${String(avgMs).padStart(6)}ms ║`);
     }
-    log(taskId, "===========================");
+    log(taskId, `╚══════════════════════╧═══════╧════════╧══════════╝`);
+    if (rlStats && total153 > 0) {
+      log(taskId, `153 breakdown: ${Object.entries(rlStats).map(([k, v]) => `${k}=${v}x`).join(', ')}`);
+    }
 
     // Final stats
     await updateTaskStats(taskId, { ...stats, phase: "completed" });

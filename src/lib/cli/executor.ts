@@ -25,6 +25,15 @@ let _global153Count = 0;
 const REQUEST_DELAY_MS = Number(process.env.CLI_REQUEST_DELAY_MS) || 0;
 const _lastCallTimes = new Map<string, number>();
 
+// ── CLI 限流统计（供爬取完成后查询）───────────────────────
+const _rateLimitCounts = new Map<string, number>(); // delayKey → 153 次数
+export function getRateLimitStats(): Record<string, number> {
+  const res: Record<string, number> = {};
+  for (const [k, v] of _rateLimitCounts) res[k] = v;
+  return res;
+}
+export function resetRateLimitStats(): void { _rateLimitCounts.clear(); }
+
 // ── 身份池缓存（避免每次调用都查 DB）────────────────────────
 interface PoolIdentity {
   id: bigint;
@@ -407,6 +416,7 @@ export async function executeCli(
 
     // ── 153 限流：优先切换身份，否则指数退避 ──
     if (result.code === CliErrorCode.RATE_LIMIT) {
+      _rateLimitCounts.set(delayKey, (_rateLimitCounts.get(delayKey) || 0) + 1);
       rateLimitStreak++;
       _global153Count++;
 
