@@ -369,6 +369,9 @@ export async function runFullCrawl(
   });
 
   const stats = {
+    startedISO: new Date().toISOString(),
+    wallTimeSec: 0,
+    rateLimits: {} as Record<string, number>,
     feedsTotal: 0,
     commentsTotal: 0,
     detailsTotal: 0,
@@ -616,6 +619,7 @@ export async function runFullCrawl(
     // ── Detailed timing report ──
     const rlStats = getRateLimitStats();
     resetRateLimitStats();
+    stats.rateLimits = rlStats;
     const total153 = Object.values(rlStats).reduce((a, b) => a + b, 0);
 
     let overallStart = Infinity, overallEnd = 0;
@@ -623,6 +627,7 @@ export async function runFullCrawl(
       if (t.started < overallStart) overallStart = t.started;
       if (t.ended && t.ended > overallEnd) overallEnd = t.ended;
     }
+    stats.wallTimeSec = Math.round((overallEnd - overallStart) / 1000);
     const totalWall = (overallEnd - overallStart) / 1000;
 
     log(taskId, `\n╔══════════════════════════════════════════════════╗`);
