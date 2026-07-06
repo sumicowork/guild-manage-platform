@@ -21,9 +21,9 @@ const CLI_TIMEOUT_MS = Number(process.env.CLI_TIMEOUT_MS) || 600_000;
 let _global153Count = 0;
 
 // ── 请求间隔 ─────────────────────────────────────────────
-// 与 .env.example 对齐：默认 1500ms（生产环境可通过 env 覆盖）
-const REQUEST_DELAY_MS = Number(process.env.CLI_REQUEST_DELAY_MS) || 300;
-let lastCallTime = 0;
+// 不同 domain.action 独立计时，避免并行 phase 互相阻塞
+const REQUEST_DELAY_MS = Number(process.env.CLI_REQUEST_DELAY_MS) || 0;
+const _lastCallTimes = new Map<string, number>();
 
 // ── 身份池缓存（避免每次调用都查 DB）────────────────────────
 interface PoolIdentity {
@@ -333,6 +333,7 @@ export async function executeCli(
   params?: object,
   adminIdentityId?: bigint | number | null
 ): Promise<any> {
+  const delayKey = domain + "." + action;
   // ── 身份选择 ──
   // 如果调用方指定了身份，直接使用；否则 round-robin 自动选择
   const userSpecifiedIdentity = !!adminIdentityId;
@@ -357,12 +358,13 @@ export async function executeCli(
   let cliEnv = buildCliEnv(currentIdentityId);
 
   // 请求间隔
+  // 请求间隔（按 domain.action 独立计时，并行 phase 互不阻塞）
   const now = Date.now();
-  const elapsed = now - lastCallTime;
+  const elapsed = now - (_lastCallTimes.get(delayKey) || 0);
   if (elapsed < REQUEST_DELAY_MS) {
     await delay(REQUEST_DELAY_MS - elapsed);
   }
-  lastCallTime = Date.now();
+  _lastCallTimes.set(delayKey, Date.now());
 
   const cliBase = resolveCliPath();
   const flagArgs = params ? buildFlagArgs(params as Record<string, any>) : [];
@@ -435,7 +437,7 @@ export async function executeCli(
           rateLimitStreak = 0; // 新身份重置 streak
 
           await delay(IDENTITY_SWITCH_DELAY_MS);
-          lastCallTime = Date.now();
+          _lastCallTimes.set(delayKey, Date.now());
           continue;
         }
 
@@ -460,7 +462,7 @@ export async function executeCli(
 
       if (attempt < MAX_RETRIES) {
         await delay(waitS * 1000);
-        lastCallTime = Date.now();
+        _lastCallTimes.set(delayKey, Date.now());
         continue;
       }
 
