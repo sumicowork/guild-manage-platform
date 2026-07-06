@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api-client';
+import { CrawlDashboard } from '@/components/CrawlDashboard';
 import { DashboardShell } from '@/components/DashboardShell';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -170,6 +171,9 @@ export default function DashboardPage() {
   return (
     <DashboardShell>
       <div className="space-y-6">
+        {/* Crawl Dashboard */}
+        <CrawlDashboard />
+
         {/* Stat cards */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
           {statCards.map((card) => {
