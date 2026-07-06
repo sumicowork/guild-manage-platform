@@ -377,16 +377,20 @@ export async function runFullCrawl(
     detailsTotal: 0,
     membersTotal: 0,
     errors: 0,
-    timing: {} as Record<string, { started: number; startedISO: string; ended?: number; endedISO?: string; calls: number; lastLogTime: number; lastLogCount: number }>,
+    timing: {} as Record<string, { started: number; startedISO: string; ended?: number; endedISO?: string; calls: number; lastLogTime: number; lastLogCount: number; current?: number; total?: number }>,
   };
 
   const recordPhaseStart = (phase: string) => {
     const now = Date.now();
     stats.timing[phase] = { started: now, startedISO: new Date(now).toISOString(), calls: 0, lastLogTime: now, lastLogCount: 0 };
   };
-  const recordPhaseCall = (phase: string) => {
+  const recordPhaseCall = (phase: string, current?: number) => {
     const t = stats.timing[phase];
-    if (t) t.calls++;
+    if (t) { t.calls++; if (current != null) t.current = current; }
+  };
+  const recordPhaseTotal = (phase: string, total: number) => {
+    const t = stats.timing[phase];
+    if (t) t.total = total;
   };
   const logPhaseSpeed = (phase: string, itemCount: number) => {
     const t = stats.timing[phase];
@@ -444,7 +448,7 @@ export async function runFullCrawl(
           if (feed.channel_id) {
             feedChannelMap[feed.feed_id] = String(feed.channel_id);
           }
-          recordPhaseCall("feeds");
+          recordPhaseCall("feeds", stats.feedsTotal + 1);
           stats.feedsTotal++;
         } catch (err) {
           stats.errors++;
@@ -474,6 +478,7 @@ export async function runFullCrawl(
       (async () => {
     recordPhaseStart("comments");
     log(taskId, "Phase 2: Fetching comments...");
+    recordPhaseTotal("comments", allFeedIds.length);
     for (let i = 0; i < allFeedIds.length; i++) {
       checkAbort(signal, taskId);
       const feedId = allFeedIds[i];
@@ -486,7 +491,7 @@ export async function runFullCrawl(
 
           for (const comment of commentPage.comments) {
             await upsertComment(comment, feedId);
-            recordPhaseCall("comments");
+            recordPhaseCall("comments", i + 1);
             stats.commentsTotal++;
 
             // Process replies nested in comments (initial batch from API)
@@ -511,7 +516,7 @@ export async function runFullCrawl(
                   gid,
                   channelId,
                   async (reply) => {
-                    recordPhaseCall("comments");
+                    recordPhaseCall("comments", i + 1);
                     await upsertReply(reply, comment.comment_id, feedId);
                     stats.commentsTotal++;
                   },
@@ -545,6 +550,7 @@ export async function runFullCrawl(
       (async () => {
     recordPhaseStart("details");
     log(taskId, "Phase 3: Fetching feed details...");
+    recordPhaseTotal("details", allFeedIds.length);
     for (let i = 0; i < allFeedIds.length; i++) {
       const feedId = allFeedIds[i];
       try {
@@ -558,7 +564,7 @@ export async function runFullCrawl(
               feed_type: detail.feed_type || undefined,
             },
           });
-          recordPhaseCall("details");
+          recordPhaseCall("details", i + 1);
           stats.detailsTotal++;
         }
       } catch (err) {
@@ -590,7 +596,7 @@ export async function runFullCrawl(
       for (const member of memberPage.members) {
         try {
           await upsertMember(member);
-          recordPhaseCall("members");
+          recordPhaseCall("members", stats.membersTotal + 1);
           stats.membersTotal++;
         } catch (err) {
           stats.errors++;
@@ -693,7 +699,25 @@ export async function runUpdateCrawl(
     commentsAdded: 0,
     cleanPages: 0,
     errors: 0,
-    autoActions: 0, // auto-rule actions
+    autoActions: 0,
+    timing: {} as Record<string, any>,
+  };
+
+  const recordPhaseStart = (phase: string) => {
+    const now = Date.now();
+    stats.timing[phase] = { started: now, startedISO: new Date(now).toISOString(), calls: 0, lastLogTime: now, lastLogCount: 0 };
+  };
+  const recordPhaseCall = (phase: string, current?: number) => {
+    const t = stats.timing[phase];
+    if (t) { t.calls++; if (current != null) t.current = current; }
+  };
+  const recordPhaseTotal = (phase: string, total: number) => {
+    const t = stats.timing[phase];
+    if (t) t.total = total;
+  };
+  const recordPhaseEnd = (phase: string) => {
+    const t = stats.timing[phase];
+    if (t) { t.ended = Date.now(); t.endedISO = new Date().toISOString(); }
   };
 
   // Load enabled auto-rules for real-time enforcement during crawl
@@ -724,6 +748,8 @@ export async function runUpdateCrawl(
   try {
     // ── Phase 1: Scan feeds for changes ──
     log(taskId, "Phase 1: Scanning feeds for changes...");
+    recordPhaseStart("scan");
+    recordPhaseTotal("scan", MAX_SCAN_PAGES);
     let cursor = "";
     let consecutiveCleanPages = 0;
     let pageCount = 0;
@@ -736,6 +762,7 @@ export async function runUpdateCrawl(
     while (consecutiveCleanPages < 2 && pageCount < MAX_SCAN_PAGES) {
       checkAbort(signal, taskId);
       pageCount++;
+      recordPhaseCall("scan", pageCount);
       const page = await getGuildFeeds(gid, cursor, 500, 2, adminIdentityId);
 
       let pageHasChanges = false;
@@ -925,16 +952,20 @@ export async function runUpdateCrawl(
       taskId,
       `Phase 1 complete: ${stats.newFeeds} new feeds, ${stats.updatedFeeds} changed. Fetching comments for ${changedFeedIds.length} feeds.`
     );
-
+    recordPhaseEnd("scan");
     // ── Phase 2: Fetch comments for changed feeds (single worker to avoid 153) ──
     if (changedFeedIds.length > 0) {
       log(taskId, "Phase 2: Fetching comments for changed feeds...");
+    recordPhaseTotal("comments", allFeedIds.length);
       const WORKER_COUNT = 1; // 单 worker 顺序执行，避免触发 153 限流
+      recordPhaseStart("comments");
+      recordPhaseTotal("comments", changedFeedIds.length);
       const chunks: string[][] = Array.from({ length: WORKER_COUNT }, () => []);
       changedFeedIds.forEach((id, i) => chunks[i % WORKER_COUNT].push(id));
 
       const workers = chunks.map(async (chunk, workerIdx) => {
         for (const feedId of chunk) {
+          recordPhaseCall("comments", stats.commentsAdded);
           checkAbort(signal, taskId);
           try {
             let commentCursor = "";
@@ -992,6 +1023,7 @@ export async function runUpdateCrawl(
 
       await Promise.all(workers);
       log(taskId, `Phase 2 complete: ${stats.commentsAdded} comments added`);
+      recordPhaseEnd("comments");
     }
 
     // ── Phase 2.5: Fetch details for all changed feeds ──
@@ -1063,9 +1095,23 @@ export async function runMemberCrawl(
     data: { status: "running", started_at: new Date() },
   });
 
-  const stats: Record<string, any> = { membersTotal: 0, newMembers: 0, errors: 0 };
+  const stats: Record<string, any> = { membersTotal: 0, newMembers: 0, errors: 0, timing: {} as Record<string, any> };
+
+  const recordPhaseStart = (phase: string) => {
+    const now = Date.now();
+    stats.timing[phase] = { started: now, startedISO: new Date(now).toISOString(), calls: 0, lastLogTime: now, lastLogCount: 0 };
+  };
+  const recordPhaseCall = (phase: string, current?: number) => {
+    const t = stats.timing[phase];
+    if (t) { t.calls++; if (current != null) t.current = current; }
+  };
+  const recordPhaseEnd = (phase: string) => {
+    const t = stats.timing[phase];
+    if (t) { t.ended = Date.now(); t.endedISO = new Date().toISOString(); }
+  };
 
   try {
+    recordPhaseStart("members");
     let cursor = "";
     let pageCount = 0;
     const seenTinyIds = new Set<string>();
@@ -1091,6 +1137,7 @@ export async function runMemberCrawl(
         }
       }
 
+      recordPhaseCall("members", stats.membersTotal);
       pageCount++;
       if (pageCount % 5 === 0) {
         log(taskId, `Members: ${stats.membersTotal} (page ${pageCount})`);
@@ -1123,6 +1170,7 @@ export async function runMemberCrawl(
 
     await updateTaskStats(taskId, { ...stats, phase: "completed" });
     await updateTaskStatus(taskId, "completed");
+    recordPhaseEnd("members");
     log(taskId, `Member crawl completed. Stats: ${JSON.stringify(stats)}`);
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
