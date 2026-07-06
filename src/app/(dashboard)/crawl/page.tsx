@@ -335,7 +335,7 @@ export default function CrawlPage() {
   useEffect(() => {
     const hasRunning = tasks.some((t) => t.status === 'running');
     if (hasRunning) {
-      intervalRef.current = setInterval(fetchTasks, 1000);
+      intervalRef.current = setInterval(fetchTasks, 500);
     } else {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
