@@ -412,9 +412,21 @@ export async function runFullCrawl(
   };
 
   try {
+    // ── Estimate totals from last successful crawl ──
+    let estFeeds = 0, estMembers = 0;
+    try {
+      const [lastFull, lastMember] = await Promise.all([
+        prisma.crawlTask.findFirst({ where: { task_type: 'full', status: 'completed' }, orderBy: { id: 'desc' }, select: { stats: true } }),
+        prisma.crawlTask.findFirst({ where: { task_type: 'members', status: 'completed' }, orderBy: { id: 'desc' }, select: { stats: true } }),
+      ]);
+      estFeeds = ((lastFull?.stats as any)?.feedsTotal) || 36000;
+      estMembers = ((lastMember?.stats as any)?.membersTotal) || 2600;
+    } catch { /* best-effort */ }
+
     // ── Phase 1: Feeds ──
     log(taskId, "Phase 1: Fetching feeds...");
     recordPhaseStart("feeds");
+    recordPhaseTotal("feeds", estFeeds);
     let cursor = "";
     let pageCount = 0;
     const allFeedIds: string[] = [];
@@ -586,6 +598,7 @@ export async function runFullCrawl(
       // Phase 4: Members
       (async () => {
     recordPhaseStart("members");
+    recordPhaseTotal("members", estMembers);
     log(taskId, "Phase 4: Fetching members...");
     let memberCursor = "";
     let memberPages = 0;
@@ -1113,7 +1126,15 @@ export async function runMemberCrawl(
   };
 
   try {
+    // Estimate total from last successful member crawl
+    let estMembers = 2600;
+    try {
+      const last = await prisma.crawlTask.findFirst({ where: { task_type: 'members', status: 'completed' }, orderBy: { id: 'desc' }, select: { stats: true } });
+      estMembers = ((last?.stats as any)?.membersTotal) || 2600;
+    } catch { /* best-effort */ }
+
     recordPhaseStart("members");
+    recordPhaseTotal("members", estMembers);
     let cursor = "";
     let pageCount = 0;
     const seenTinyIds = new Set<string>();
