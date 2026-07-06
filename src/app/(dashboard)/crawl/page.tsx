@@ -134,7 +134,7 @@ function LiveCrawlDashboard({ tasks }: { tasks: CrawlTask[] }) {
 
   return (
     <div className="space-y-3">
-      {running.map(task => {
+      {display.map(task => {
         const stats = task.stats || {};
         const timing = stats.timing as Record<string, { started: number; ended?: number; calls: number; current?: number; total?: number }> | undefined;
         const wallTime = stats.wallTimeSec as number | undefined;
