@@ -74,7 +74,7 @@ const triggerLabels: Record<string, string> = {
   auto: '自动',
 };
 
-const phaseLabels: Record<string, string> = { feeds: '帖子', comments: '评论', details: '详情', members: '成员' };
+const phaseLabels: Record<string, string> = { feeds: '帖子', comments: '评论', details: '详情', members: '成员', scan: '扫描' };
 
 function SpeedReport({ timing, wallTime, rateLimits, status }: {
   timing: Record<string, { started: number; ended?: number; calls: number; current?: number; total?: number }>;
@@ -174,12 +174,16 @@ function LiveCrawlDashboard({ tasks }: { tasks: CrawlTask[] }) {
                 const done = !!t.ended;
                 const hasProgress = (t.total ?? 0) > 0 && t.current != null;
                 const pct = done ? 100 : (hasProgress ? Math.min(99, Math.round(t.current! / t.total! * 100)) : Math.min(99, (t.calls % 1000) / 10));
+                const progressLabel = hasProgress ? `${t.current}/${t.total}` : (done ? '完成' : '—');
                 return (
                   <div key={p} className="space-y-0.5">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-gray-500">{phaseLabels[p] || p}</span>
+                      <span className="text-gray-500">
+                        {phaseLabels[p] || p}
+                        <span className="text-gray-300 ml-1">{progressLabel}</span>
+                      </span>
                       <span className="font-mono text-gray-400">
-                        {done ? `✓ ${t.calls}次 ${avgMs.toFixed(0)}ms` : `${t.calls}次 ${avgMs.toFixed(0)}ms`}
+                        {done ? `✓ ${t.calls}次·${avgMs.toFixed(0)}ms` : t.calls > 0 ? `${t.calls}次·${avgMs.toFixed(0)}ms` : '—'}
                       </span>
                     </div>
                     <div className="h-1 rounded-full bg-gray-100 overflow-hidden">
