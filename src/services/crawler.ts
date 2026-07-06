@@ -373,11 +373,39 @@ export async function runFullCrawl(
     detailsTotal: 0,
     membersTotal: 0,
     errors: 0,
+    timing: {} as Record<string, { started: number; ended?: number; calls: number; lastLogTime: number; lastLogCount: number }>,
+  };
+
+  const recordPhaseStart = (phase: string) => {
+    stats.timing[phase] = { started: Date.now(), calls: 0, lastLogTime: Date.now(), lastLogCount: 0 };
+  };
+  const recordPhaseCall = (phase: string) => {
+    const t = stats.timing[phase];
+    if (t) t.calls++;
+  };
+  const logPhaseSpeed = (phase: string, itemCount: number) => {
+    const t = stats.timing[phase];
+    if (!t) return;
+    const now = Date.now();
+    const elapsed = (now - t.lastLogTime) / 1000;
+    if (elapsed < 5) return; // skip if <5s since last log
+    const calls = t.calls - t.lastLogCount;
+    const cpm = calls / elapsed * 60;
+    log(taskId, `[${phase}] ${itemCount} items, ${calls} calls in ${elapsed.toFixed(0)}s → ${cpm.toFixed(0)} calls/min`);
+    t.lastLogTime = now;
+    t.lastLogCount = t.calls;
+  };
+  const recordPhaseEnd = (phase: string) => {
+    const t = stats.timing[phase];
+    if (t) t.ended = Date.now();
+    const dur = t ? (t.ended! - t.started) / 1000 : 0;
+    log(taskId, `[${phase}] done: ${t?.calls || 0} calls in ${dur.toFixed(0)}s (${(t?.calls || 0) / dur * 60 | 0} calls/min)`);
   };
 
   try {
     // ── Phase 1: Feeds ──
     log(taskId, "Phase 1: Fetching feeds...");
+    recordPhaseStart("feeds");
     let cursor = "";
     let pageCount = 0;
     const allFeedIds: string[] = [];
@@ -411,6 +439,7 @@ export async function runFullCrawl(
           if (feed.channel_id) {
             feedChannelMap[feed.feed_id] = String(feed.channel_id);
           }
+          recordPhaseCall("feeds");
           stats.feedsTotal++;
         } catch (err) {
           stats.errors++;
@@ -421,6 +450,7 @@ export async function runFullCrawl(
       pageCount++;
       if (pageCount % 10 === 0) {
         log(taskId, `Feeds: ${stats.feedsTotal} processed (page ${pageCount})`);
+        logPhaseSpeed("feeds", stats.feedsTotal);
         await updateTaskStats(taskId, { ...stats, phase: "feeds" });
       }
 
@@ -429,6 +459,7 @@ export async function runFullCrawl(
     }
 
     log(taskId, `Phase 1 complete: ${stats.feedsTotal} feeds in ${pageCount} pages`);
+    recordPhaseEnd("feeds");
 
     // ── Phase 2+3+4: Comments, Details, Members (parallel — different CLI commands, independent rate limits) ──
     log(taskId, "Phase 2+3+4: Launching comments, details, and members in parallel...");
@@ -436,6 +467,7 @@ export async function runFullCrawl(
     await Promise.all([
       // Phase 2: Comments
       (async () => {
+    recordPhaseStart("comments");
     log(taskId, "Phase 2: Fetching comments...");
     for (let i = 0; i < allFeedIds.length; i++) {
       checkAbort(signal, taskId);
@@ -449,6 +481,7 @@ export async function runFullCrawl(
 
           for (const comment of commentPage.comments) {
             await upsertComment(comment, feedId);
+            recordPhaseCall("comments");
             stats.commentsTotal++;
 
             // Process replies nested in comments (initial batch from API)
@@ -473,6 +506,7 @@ export async function runFullCrawl(
                   gid,
                   channelId,
                   async (reply) => {
+                    recordPhaseCall("comments");
                     await upsertReply(reply, comment.comment_id, feedId);
                     stats.commentsTotal++;
                   },
@@ -493,15 +527,18 @@ export async function runFullCrawl(
 
       if ((i + 1) % 50 === 0) {
         log(taskId, `Comments: ${stats.commentsTotal} from ${i + 1}/${allFeedIds.length} feeds`);
+        logPhaseSpeed("comments", i + 1);
         await updateTaskStats(taskId, { ...stats, phase: "comments" });
       }
     }
 
     log(taskId, `Phase 2 complete: ${stats.commentsTotal} comments`);
+    recordPhaseEnd("comments");
       })(),
 
       // Phase 3: Details
       (async () => {
+    recordPhaseStart("details");
     log(taskId, "Phase 3: Fetching feed details...");
     for (let i = 0; i < allFeedIds.length; i++) {
       const feedId = allFeedIds[i];
@@ -516,6 +553,7 @@ export async function runFullCrawl(
               feed_type: detail.feed_type || undefined,
             },
           });
+          recordPhaseCall("details");
           stats.detailsTotal++;
         }
       } catch (err) {
@@ -525,15 +563,18 @@ export async function runFullCrawl(
 
       if ((i + 1) % 100 === 0) {
         log(taskId, `Details: ${stats.detailsTotal}/${i + 1} feeds`);
+        logPhaseSpeed("details", i + 1);
         await updateTaskStats(taskId, { ...stats, phase: "details" });
       }
     }
 
     log(taskId, `Phase 3 complete: ${stats.detailsTotal} details`);
+    recordPhaseEnd("details");
       })(),
 
       // Phase 4: Members
       (async () => {
+    recordPhaseStart("members");
     log(taskId, "Phase 4: Fetching members...");
     let memberCursor = "";
     let memberPages = 0;
@@ -544,6 +585,7 @@ export async function runFullCrawl(
       for (const member of memberPage.members) {
         try {
           await upsertMember(member);
+          recordPhaseCall("members");
           stats.membersTotal++;
         } catch (err) {
           stats.errors++;
@@ -554,6 +596,7 @@ export async function runFullCrawl(
       memberPages++;
       if (memberPages % 5 === 0) {
         log(taskId, `Members: ${stats.membersTotal} (page ${memberPages})`);
+        logPhaseSpeed("members", stats.membersTotal);
         await updateTaskStats(taskId, { ...stats, phase: "members" });
       }
 
@@ -562,10 +605,20 @@ export async function runFullCrawl(
     }
 
     log(taskId, `Phase 4 complete: ${stats.membersTotal} members`);
+    recordPhaseEnd("members");
       })(),
     ]);
 
     log(taskId, `Phases 2+3+4 complete`);
+
+    // ── Timing report ──
+    log(taskId, "=== Crawl Timing Report ===");
+    for (const [phase, t] of Object.entries(stats.timing)) {
+      const dur = ((t.ended || Date.now()) - t.started) / 1000;
+      const cpm = dur > 0 ? (t.calls / dur * 60 | 0) : 0;
+      log(taskId, `  ${phase}: ${t.calls} calls in ${dur.toFixed(0)}s → ${cpm} calls/min`);
+    }
+    log(taskId, "===========================");
 
     // Final stats
     await updateTaskStats(taskId, { ...stats, phase: "completed" });
