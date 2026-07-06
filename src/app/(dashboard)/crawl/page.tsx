@@ -74,10 +74,64 @@ const triggerLabels: Record<string, string> = {
   auto: '自动',
 };
 
-/** Render stats flexibly based on crawl type */
-function renderStats(stats: Record<string, any> | undefined) {
+const phaseLabels: Record<string, string> = { feeds: '帖子', comments: '评论', details: '详情', members: '成员' };
+
+function SpeedReport({ timing, wallTime, rateLimits, status }: {
+  timing: Record<string, { started: number; ended?: number; calls: number }>;
+  wallTime?: number;
+  rateLimits?: Record<string, number>;
+  status?: string;
+}) {
+  const phases = Object.entries(timing);
+  if (phases.length === 0) return <span className="text-xs text-gray-400">-</span>;
+
+  const total153 = rateLimits ? Object.values(rateLimits).reduce((a, b) => a + b, 0) : 0;
+
+  return (
+    <div className="space-y-1 min-w-[200px]">
+      {wallTime != null && (
+        <div className="text-xs text-gray-500">
+          总耗时 <span className="font-mono font-medium text-gray-700">{fmtDuration(wallTime)}</span>
+          {total153 > 0 && <span className="ml-2 text-orange-500">⚠ 153×{total153}</span>}
+        </div>
+      )}
+      {phases.map(([phase, t]) => {
+        const dur = ((t.ended || Date.now()) - t.started) / 1000;
+        const avgMs = t.calls > 0 ? (dur * 1000 / t.calls) : 0;
+        const running = !t.ended && status === 'running';
+        return (
+          <div key={phase} className="flex items-center gap-1.5 text-xs">
+            <span className="w-8 text-gray-400">{phaseLabels[phase] || phase}</span>
+            <span className={`font-mono font-medium ${running ? 'text-blue-600' : 'text-gray-700'}`}>
+              {t.calls}次
+            </span>
+            <span className="text-gray-400">·</span>
+            <span className="font-mono text-gray-500">{avgMs.toFixed(0)}ms</span>
+            {running && <span className="ml-auto inline-block size-1.5 rounded-full bg-blue-400 animate-pulse" />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function fmtDuration(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m${sec % 60}s`;
+  return `${(sec / 3600).toFixed(1)}h`;
+}
+function renderStats(stats: Record<string, any> | undefined, taskStatus?: string) {
   if (!stats) return <span className="text-xs text-gray-400">-</span>;
 
+  const timing = stats.timing as Record<string, { started: number; ended?: number; calls: number }> | undefined;
+  const wallTime = stats.wallTimeSec as number | undefined;
+
+  // ── Speed report (when timing data available) ──
+  if (timing && Object.keys(timing).length > 0) {
+    return <SpeedReport timing={timing} wallTime={wallTime} rateLimits={stats.rateLimits} status={taskStatus} />;
+  }
+
+  // ── Legacy: simple stat badges ──
   const items: { label: string; value: number; color: string }[] = [];
 
   // Full crawl stats
@@ -278,7 +332,7 @@ export default function CrawlPage() {
     {
       key: 'stats',
       header: '统计',
-      render: (t) => renderStats(t.stats),
+      render: (t) => renderStats(t.stats, t.status),
     },
     {
       key: 'error',
