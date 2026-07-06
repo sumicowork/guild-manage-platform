@@ -77,7 +77,7 @@ const triggerLabels: Record<string, string> = {
 const phaseLabels: Record<string, string> = { feeds: '帖子', comments: '评论', details: '详情', members: '成员' };
 
 function SpeedReport({ timing, wallTime, rateLimits, status }: {
-  timing: Record<string, { started: number; ended?: number; calls: number }>;
+  timing: Record<string, { started: number; ended?: number; calls: number; current?: number; total?: number }>;
   wallTime?: number;
   rateLimits?: Record<string, number>;
   status?: string;
@@ -136,7 +136,7 @@ function LiveCrawlDashboard({ tasks }: { tasks: CrawlTask[] }) {
     <div className="space-y-3">
       {running.map(task => {
         const stats = task.stats || {};
-        const timing = stats.timing as Record<string, { started: number; ended?: number; calls: number }> | undefined;
+        const timing = stats.timing as Record<string, { started: number; ended?: number; calls: number; current?: number; total?: number }> | undefined;
         const wallTime = stats.wallTimeSec as number | undefined;
         const rateLimits = stats.rateLimits as Record<string, number> | undefined;
         const phase = stats.phase as string || '';
@@ -174,8 +174,8 @@ function LiveCrawlDashboard({ tasks }: { tasks: CrawlTask[] }) {
                 const dur = ((t.ended || Date.now()) - t.started) / 1000;
                 const avgMs = t.calls > 0 ? dur * 1000 / t.calls : 0;
                 const done = !!t.ended;
-                const hasProgress = t.total > 0 && t.current != null;
-                const pct = hasProgress ? Math.min(100, Math.round(t.current / t.total * 100)) : (done ? 100 : Math.min(99, (t.calls % 1000) / 10));
+                const hasProgress = (t.total ?? 0) > 0 && t.current != null;
+                const pct = hasProgress ? Math.min(100, Math.round(t.current! / t.total! * 100)) : (done ? 100 : Math.min(99, (t.calls % 1000) / 10));
                 return (
                   <div key={p} className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
@@ -216,7 +216,7 @@ function LiveCrawlDashboard({ tasks }: { tasks: CrawlTask[] }) {
 function renderStats(stats: Record<string, any> | undefined, taskStatus?: string) {
   if (!stats) return <span className="text-xs text-gray-400">-</span>;
 
-  const timing = stats.timing as Record<string, { started: number; ended?: number; calls: number }> | undefined;
+  const timing = stats.timing as Record<string, { started: number; ended?: number; calls: number; current?: number; total?: number }> | undefined;
   const wallTime = stats.wallTimeSec as number | undefined;
 
   // ── Speed report (when timing data available) ──

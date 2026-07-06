@@ -956,9 +956,9 @@ export async function runUpdateCrawl(
     // ── Phase 2: Fetch comments for changed feeds (single worker to avoid 153) ──
     if (changedFeedIds.length > 0) {
       log(taskId, "Phase 2: Fetching comments for changed feeds...");
-    recordPhaseTotal("comments", allFeedIds.length);
-      const WORKER_COUNT = 1; // 单 worker 顺序执行，避免触发 153 限流
       recordPhaseStart("comments");
+    recordPhaseTotal("comments", changedFeedIds.length);
+    const WORKER_COUNT = 1; // 单 worker 顺序执行，避免触发 153 限流
       recordPhaseTotal("comments", changedFeedIds.length);
       const chunks: string[][] = Array.from({ length: WORKER_COUNT }, () => []);
       changedFeedIds.forEach((id, i) => chunks[i % WORKER_COUNT].push(id));
