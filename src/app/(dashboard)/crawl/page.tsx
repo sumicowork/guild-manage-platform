@@ -137,7 +137,8 @@ function LiveCrawlDashboard({ tasks }: { tasks: CrawlTask[] }) {
       {display.map(task => {
         const stats = task.stats || {};
         const timing = stats.timing as Record<string, { started: number; ended?: number; calls: number; current?: number; total?: number }> | undefined;
-        const wallTime = stats.wallTimeSec as number | undefined;
+        const wallTime = stats.wallTimeSec as number | undefined
+          || (timing ? Math.round((Object.values(timing).reduce((max, t) => Math.max(max, (t.ended || Date.now()) - t.started), 0)) / 1000) : undefined);
         const rateLimits = stats.rateLimits as Record<string, number> | undefined;
         const phase = stats.phase as string || '';
         const elapsed = task.startedAt ? Math.round((Date.now() - new Date(task.startedAt).getTime()) / 1000) : 0;
@@ -173,24 +174,28 @@ function LiveCrawlDashboard({ tasks }: { tasks: CrawlTask[] }) {
               {timing && Object.entries(timing).map(([p, t]) => {
                 const dur = ((t.ended || Date.now()) - t.started) / 1000;
                 const avgMs = t.calls > 0 ? dur * 1000 / t.calls : 0;
+                const cpm = dur > 0 ? (t.calls / dur * 60 | 0) : 0;
                 const done = !!t.ended;
                 const hasProgress = (t.total ?? 0) > 0 && t.current != null;
-                const pct = hasProgress ? Math.min(100, Math.round(t.current! / t.total! * 100)) : (done ? 100 : Math.min(99, (t.calls % 1000) / 10));
+                const pct = done ? 100 : (hasProgress ? Math.min(99, Math.round(t.current! / t.total! * 100)) : Math.min(99, (t.calls % 1000) / 10));
                 return (
                   <div key={p} className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="text-gray-600">{phaseLabels[p] || p}</span>
+                      <span className="font-medium text-gray-600">
+                        {phaseLabels[p] || p}
+                        {done && <span className="ml-1 text-gray-400 font-normal">{fmtDuration(dur)}</span>}
+                      </span>
                       <span className="font-mono text-gray-500">
                         {done ? (
-                          <span className="text-green-600">✓ {t.calls}次 · {avgMs.toFixed(0)}ms</span>
+                          <span className="text-green-600">✓ {t.calls}次 · {avgMs.toFixed(0)}ms/次 · {cpm}/min</span>
                         ) : (
-                          <span className="text-blue-600">{t.calls}次 · {avgMs.toFixed(0)}ms/次{hasProgress ? ` · ${pct}%` : ''}{phase === p ? ' · 进行中' : ''}</span>
+                          <span className="text-blue-600">{t.calls}次 · {avgMs.toFixed(0)}ms</span>
                         )}
                       </span>
                     </div>
                     <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
                       <div
-                        className={`h-full rounded-full transition-all duration-1000 ${done ? 'bg-green-400' : isRunning ? 'bg-blue-400 animate-pulse' : 'bg-gray-300'}`}
+                        className={`h-full rounded-full transition-all duration-1000 ${done ? 'bg-green-400' : isRunning ? 'bg-blue-400 animate-pulse' : 'bg-red-400'}`}
                         style={{ width: `${pct}%` }}
                       />
                     </div>
@@ -199,11 +204,16 @@ function LiveCrawlDashboard({ tasks }: { tasks: CrawlTask[] }) {
               })}
 
               {/* Summary row */}
-              <div className="flex flex-wrap gap-3 text-xs text-gray-500 pt-1 border-t border-gray-100">
+              <div className="flex flex-wrap gap-3 text-xs text-gray-500 pt-1.5 border-t border-gray-100">
                 {stats.feedsTotal != null && <span>帖子 <b className="text-gray-700">{stats.feedsTotal}</b></span>}
                 {stats.commentsTotal != null && <span>评论 <b className="text-gray-700">{stats.commentsTotal}</b></span>}
                 {stats.detailsTotal != null && <span>详情 <b className="text-gray-700">{stats.detailsTotal}</b></span>}
                 {stats.membersTotal != null && <span>成员 <b className="text-gray-700">{stats.membersTotal}</b></span>}
+                {stats.newFeeds != null && <span>新帖 <b className="text-green-600">{stats.newFeeds}</b></span>}
+                {stats.updatedFeeds != null && <span>更新 <b className="text-blue-600">{stats.updatedFeeds}</b></span>}
+                {stats.commentsAdded != null && <span>新评论 <b className="text-cyan-600">{stats.commentsAdded}</b></span>}
+                {stats.newMembers != null && <span>新成员 <b className="text-green-600">{stats.newMembers}</b></span>}
+                {stats.autoActions > 0 && <span className="text-purple-500">自动操作 <b>{stats.autoActions}</b></span>}
                 {stats.errors > 0 && <span className="text-red-500">错误 <b>{stats.errors}</b></span>}
               </div>
             </CardContent>

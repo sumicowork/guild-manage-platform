@@ -964,8 +964,10 @@ export async function runUpdateCrawl(
       changedFeedIds.forEach((id, i) => chunks[i % WORKER_COUNT].push(id));
 
       const workers = chunks.map(async (chunk, workerIdx) => {
+        let feedIdx = 0;
         for (const feedId of chunk) {
-          recordPhaseCall("comments", stats.commentsAdded);
+          feedIdx++;
+          recordPhaseCall("comments", feedIdx);
           checkAbort(signal, taskId);
           try {
             let commentCursor = "";
