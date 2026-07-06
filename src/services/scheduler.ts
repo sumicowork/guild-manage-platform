@@ -49,15 +49,12 @@ let identityCheckTask: ScheduledTask | null = null;
 let currentUpdateCron = process.env.CRAWL_CRON || persisted.update || DEFAULT_CRON;
 let currentMemberCron = process.env.MEMBER_CRON || persisted.member || MEMBER_CRON;
 
-/** Tracks whether a crawl of each type is currently running to prevent overlap */
+/** Tracks running tasks for frontend display (real lock is DB-based in triggerCrawl) */
 const runningTasks: Record<string, boolean> = {
   full: false,
   update: false,
   members: false,
 };
-
-/** Global lock: only one crawl of any type runs at a time to avoid CLI rate-limit (153) */
-let _anyCrawlRunning = false;
 
 /** Tracks AbortControllers for currently running tasks, keyed by task ID (as string).
  *  Used by cancelCrawl() to signal cancellation to in-flight crawls. */
@@ -80,17 +77,14 @@ export async function triggerCrawl(
   userId?: number,
   adminIdentityId?: number
 ): Promise<bigint> {
-  // Prevent concurrent crawls of the same type
-  if (runningTasks[type]) {
+  // DB-based lock: check for any running crawl (avoids Next.js bundle chunk isolation issue)
+  const existing = await prisma.crawlTask.findFirst({
+    where: { status: "running" },
+    select: { id: true, task_type: true },
+  });
+  if (existing) {
     throw new Error(
-      `A ${type} crawl is already running. Please wait for it to finish.`
-    );
-  }
-
-  // Global lock: prevent any concurrent crawl to avoid CLI 153 rate-limit
-  if (_anyCrawlRunning) {
-    throw new Error(
-      `Another crawl is currently running. Please wait for it to finish before starting a ${type} crawl.`
+      `无法启动 ${type} 爬取：已有 ${existing.task_type} 任务 (ID=${existing.id}) 正在运行中`
     );
   }
 
@@ -111,7 +105,6 @@ export async function triggerCrawl(
   console.log(`[Scheduler] Created ${type} crawl task #${taskId}`);
 
   // Don't await — let it run in the background
-  _anyCrawlRunning = true;
   runningTasks[type] = true;
 
   const controller = new AbortController();
@@ -151,7 +144,6 @@ export async function triggerCrawl(
       }
     } finally {
       runningTasks[type] = false;
-      _anyCrawlRunning = false;
       _abortControllers.delete(taskIdStr);
     }
   };
@@ -160,7 +152,6 @@ export async function triggerCrawl(
   run().catch((err) => {
     console.error(`[Scheduler] Unhandled error in ${type} crawl:`, err);
     runningTasks[type] = false;
-    _anyCrawlRunning = false;
     _abortControllers.delete(taskIdStr);
   });
 
