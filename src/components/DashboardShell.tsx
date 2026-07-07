@@ -64,7 +64,7 @@ function DashboardShellInner({ children }: DashboardShellProps) {
   const SidebarContent = () => (
     <div className="flex h-full flex-col">
       <div className="flex h-14 items-center px-4">
-        <h1 className="text-base font-semibold text-gray-900">频道管理平台</h1>
+        <h1 className="text-base font-semibold text-gray-900">PAIMON</h1>
       </div>
       <Separator className="bg-gray-200" />
       <nav className="flex-1 space-y-0.5 px-2 py-3">

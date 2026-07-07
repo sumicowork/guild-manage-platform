@@ -42,8 +42,8 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle className="text-xl">频道管理平台</CardTitle>
-          <CardDescription>登录管理员账户</CardDescription>
+          <CardTitle className="text-xl">PAIMON</CardTitle>
+          <CardDescription>Platform for Archiving, Inspection, Moderation and Operations Network</CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="flex flex-col gap-4">
