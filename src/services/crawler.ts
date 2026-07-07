@@ -560,38 +560,44 @@ export async function runFullCrawl(
     recordPhaseEnd("comments");
       })(),
 
-      // Phase 3: Details
+      // Phase 3: Details (parallel workers)
       (async () => {
+    const DETAIL_WORKERS = 3;
     recordPhaseStart("details");
-    log(taskId, "Phase 3: Fetching feed details...");
+    log(taskId, `Phase 3: Fetching feed details with ${DETAIL_WORKERS} parallel workers...`);
     recordPhaseTotal("details", allFeedIds.length);
-    for (let i = 0; i < allFeedIds.length; i++) {
-      const feedId = allFeedIds[i];
-      try {
-        const detail = await getFeedDetail(feedId, gid, adminIdentityId);
-        if (detail && detail.content) {
-          await prisma.feed.update({
-            where: { feed_id: feedId },
-            data: {
-              content: detail.content,
-              share_url: detail.share_url || undefined,
-              feed_type: detail.feed_type || undefined,
-            },
-          });
-          recordPhaseCall("details", i + 1);
-          stats.detailsTotal++;
-        }
-      } catch (err) {
-        stats.errors++;
-        console.error(`[Crawler] Failed to fetch detail for feed ${feedId}:`, err);
-      }
 
-      await updateTaskStats(taskId, { ...stats, phase: "details" });
-      if ((i + 1) % 50 === 0) {
-        log(taskId, `Details: ${stats.detailsTotal}/${i + 1} feeds`);
-        logPhaseSpeed("details", i + 1);
+    // Interleave feeds across workers for even identity distribution
+    const detailChunks: string[][] = Array.from({ length: DETAIL_WORKERS }, () => []);
+    allFeedIds.forEach((id, i) => detailChunks[i % DETAIL_WORKERS].push(id));
+
+    await Promise.all(detailChunks.map((chunk) => (async () => {
+      for (const feedId of chunk) {
+        try {
+          const detail = await getFeedDetail(feedId, gid, adminIdentityId);
+          if (detail && detail.content) {
+            await prisma.feed.update({
+              where: { feed_id: feedId },
+              data: {
+                content: detail.content,
+                share_url: detail.share_url || undefined,
+                feed_type: detail.feed_type || undefined,
+              },
+            });
+            stats.detailsTotal++;
+            recordPhaseCall("details", stats.detailsTotal);
+          }
+        } catch (err) {
+          stats.errors++;
+          console.error(`[Crawler] Failed to fetch detail for feed ${feedId}:`, err);
+        }
+        await updateTaskStats(taskId, { ...stats, phase: "details" });
+        if (stats.detailsTotal % 50 === 0) {
+          log(taskId, `Details: ${stats.detailsTotal}/${allFeedIds.length}`);
+          logPhaseSpeed("details", stats.detailsTotal);
+        }
       }
-    }
+    })()));
 
     log(taskId, `Phase 3 complete: ${stats.detailsTotal} details`);
     recordPhaseEnd("details");
