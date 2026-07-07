@@ -17,8 +17,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: '频道管理平台',
-  description: '腾讯频道(QQ频道)社区管理系统',
+  title: 'PAIMON',
+  description: 'Platform for Archiving, Inspection, Moderation and Operations Network',
 };
 
 export default function RootLayout({
