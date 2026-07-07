@@ -32,19 +32,17 @@ function fmtDuration(sec: number): string {
 export function CrawlDashboard() {
   const [tasks, setTasks] = useState<CrawlTask[]>([]);
 
-  const [error, setError] = useState<string | null>(null);
-
   const fetchTasks = useCallback(async () => {
     try {
-      const result = await api.get<{ data: CrawlTask[]; total: number }>('/crawl/tasks?pageSize=30');
-      setTasks(result.data);
-      setError(null);
-    } catch (err) {
-      console.error('[CrawlDashboard] fetch failed:', err);
-      setError('加载爬取数据失败，将自动重试');
-      // Retry after 5s
-      setTimeout(() => fetchTasks(), 5000);
-    }
+      // Fetch latest per type — avoids being buried by minutely cron tasks
+      const results = await Promise.all(
+        ['full', 'update', 'members'].map(type =>
+          api.get<{ data: CrawlTask[] }>(`/crawl/tasks?pageSize=1&type=${type}`)
+        )
+      );
+      const tasks = results.flatMap(r => r.data || []);
+      setTasks(tasks);
+    } catch { /* ignore — SSE retries on next event */ }
   }, []);
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
@@ -60,16 +58,13 @@ export function CrawlDashboard() {
   const types = ['full', 'update', 'members'] as const;
   const typeIcons: Record<string, string> = { full: '全量爬取', update: '增量更新', members: '爬取成员' };
 
-  const latestByType = new Map<string, CrawlTask>();
-  for (const t of tasks) {
-    const existing = latestByType.get(t.type);
-    if (!existing || t.id > existing.id) latestByType.set(t.type, t);
-  }
+  const taskByType = new Map<string, CrawlTask>();
+  for (const t of tasks) taskByType.set(t.type, t);
 
   return (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
       {types.map(type => {
-        const task = latestByType.get(type);
+        const task = taskByType.get(type);
         if (!task) return (
           <Card key={type} className="border-gray-100">
             <CardContent className="p-4 text-center text-sm text-gray-400">{typeIcons[type]}</CardContent>

@@ -12,14 +12,19 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get("pageSize") || "20", 10)));
+    const type = searchParams.get("type") || undefined;
+
+    const where: any = {};
+    if (type) where.task_type = type;
 
     const [tasks, total] = await Promise.all([
       prisma.crawlTask.findMany({
+        where,
         orderBy: { created_at: "desc" },
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
-      prisma.crawlTask.count(),
+      prisma.crawlTask.count({ where }),
     ]);
 
     const rawTasks = serializeBigInt(tasks);
