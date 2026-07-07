@@ -1055,10 +1055,14 @@ export async function runUpdateCrawl(
 
     // ── Phase 2.5: Fetch details for all changed feeds ──
     if (changedFeedIds.length > 0) {
+      recordPhaseStart("details");
+      recordPhaseTotal("details", changedFeedIds.length);
       log(taskId, `Phase 2.5: Fetching details for ${changedFeedIds.length} changed feeds...`);
       let detailsFetched = 0;
+      let detailIdx = 0;
       for (const feedId of changedFeedIds) {
         checkAbort(signal, taskId);
+        detailIdx++;
         try {
           const detail = await getFeedDetail(feedId, gid, adminIdentityId);
           if (detail && detail.content) {
@@ -1072,10 +1076,12 @@ export async function runUpdateCrawl(
             });
             detailsFetched++;
           }
+          recordPhaseCall("details", detailIdx);
         } catch (err) {
           console.error(`[Crawl] Failed to fetch detail for ${feedId}:`, err);
         }
       }
+      recordPhaseEnd("details");
       log(taskId, `Phase 2.5 complete: ${detailsFetched} details fetched/updated`);
     }
 
