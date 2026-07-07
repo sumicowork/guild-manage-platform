@@ -32,11 +32,19 @@ function fmtDuration(sec: number): string {
 export function CrawlDashboard() {
   const [tasks, setTasks] = useState<CrawlTask[]>([]);
 
+  const [error, setError] = useState<string | null>(null);
+
   const fetchTasks = useCallback(async () => {
     try {
       const result = await api.get<{ data: CrawlTask[]; total: number }>('/crawl/tasks?pageSize=30');
       setTasks(result.data);
-    } catch { /* ignore */ }
+      setError(null);
+    } catch (err) {
+      console.error('[CrawlDashboard] fetch failed:', err);
+      setError('加载爬取数据失败，将自动重试');
+      // Retry after 5s
+      setTimeout(() => fetchTasks(), 5000);
+    }
   }, []);
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
