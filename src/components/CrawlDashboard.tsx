@@ -126,7 +126,11 @@ export function CrawlDashboard() {
                 {stats.detailsTotal != null && <span>详情<b className="text-gray-600 ml-0.5">{stats.detailsTotal}</b></span>}
                 {stats.membersTotal != null && <span>成员<b className="text-gray-600 ml-0.5">{stats.membersTotal}</b></span>}
                 {stats.newFeeds != null && <span>新帖<b className="text-green-600 ml-0.5">{stats.newFeeds}</b></span>}
-                {stats.updatedFeeds != null && <span>更新<b className="text-blue-600 ml-0.5">{stats.updatedFeeds}</b></span>}
+                {stats.updatedFeeds != null && (
+                  <span title={stats.changedFeedIds?.slice(0, 5).join(', ') + (stats.changedFeedIds?.length > 5 ? '...' : '') || ''}>
+                    更新<b className="text-blue-600 ml-0.5">{stats.updatedFeeds}</b>
+                  </span>
+                )}
                 {stats.commentsAdded != null && <span>新评<b className="text-cyan-600 ml-0.5">{stats.commentsAdded}</b></span>}
                 {stats.newMembers != null && <span>新成员<b className="text-green-600 ml-0.5">{stats.newMembers}</b></span>}
                 {stats.autoActions > 0 && <span>自动<b className="text-purple-500 ml-0.5">{stats.autoActions}</b></span>}
