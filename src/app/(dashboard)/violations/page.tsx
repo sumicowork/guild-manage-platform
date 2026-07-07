@@ -22,10 +22,16 @@ interface Violation {
   targetType: string;
   targetId: string;
   targetFeedId?: string;
+  targetCommentId?: string;
+  targetReplyId?: string;
   targetAuthor: string;
   reason: string;
   actionType: string;
+  actionDetail?: { movedToChannel?: string; muteDurationHours?: string } | null;
+  violationDetail?: string | null;
   notified: boolean;
+  notificationType?: string | null;
+  notificationText?: string | null;
   operator: string;
   identityName: string;
 }
@@ -41,12 +47,16 @@ const actionLabels: Record<string, string> = {
   move: '移帖',
   delete: '删帖',
   delete_comment: '删评论',
+  delete_reply: '删评论',
+  none: '未处理',
 };
 
 const actionColors: Record<string, string> = {
   move: 'bg-amber-50 text-amber-600',
   delete: 'bg-red-50 text-red-600',
   delete_comment: 'bg-orange-50 text-orange-600',
+  delete_reply: 'bg-orange-50 text-orange-600',
+  none: 'bg-gray-100 text-gray-500',
 };
 
 const targetTypeLabels: Record<string, string> = {
@@ -177,23 +187,51 @@ export default function ViolationsPage() {
     {
       key: 'actionType',
       header: '处置方式',
-      width: '90px',
-      render: (v) => (
-        <Badge className={actionColors[v.actionType] || 'bg-gray-200 text-gray-700'}>
-          {actionLabels[v.actionType] || v.actionType}
-        </Badge>
-      ),
+      width: '110px',
+      render: (v) => {
+        const action = actionLabels[v.actionType] || v.actionType;
+        const ad = v.actionDetail;
+        const extras: string[] = [];
+        if (ad?.muteDurationHours) extras.push(`禁言${ad.muteDurationHours}`);
+        if (ad?.movedToChannel) extras.push(`→${ad.movedToChannel}`);
+        const title = extras.length > 0 ? `${action}（${extras.join('，')}）` : action;
+        return (
+          <Badge className={actionColors[v.actionType] || 'bg-gray-200 text-gray-700'} title={title}>
+            {title.length > 14 ? title.slice(0, 12) + '…' : title}
+          </Badge>
+        );
+      },
+    },
+    {
+      key: 'violationDetail',
+      header: '补充说明',
+      width: '130px',
+      render: (v) => {
+        const d = v.violationDetail;
+        if (!d) return <span className="text-xs text-gray-300">-</span>;
+        const short = d.length > 20 ? d.slice(0, 18) + '…' : d;
+        return (
+          <span className="text-xs text-gray-600 cursor-help" title={d}>
+            {short}
+          </span>
+        );
+      },
     },
     {
       key: 'notified',
       header: '通知',
-      width: '60px',
+      width: '75px',
       align: 'center',
-      render: (v) => (
-        <span className={`text-xs ${v.notified ? 'text-green-400' : 'text-gray-400'}`}>
-          {v.notified ? '已通知' : '未通知'}
-        </span>
-      ),
+      render: (v) => {
+        if (!v.notified) return <span className="text-xs text-gray-400">未通知</span>;
+        const typeLabel = v.notificationType === 'dm' ? '私信' : v.notificationType === 'reply' ? '评论' : '';
+        const tip = [typeLabel, v.notificationText].filter(Boolean).join('：');
+        return (
+          <span className="text-xs text-green-500 cursor-help" title={tip}>
+            已通知{typeLabel ? `(${typeLabel})` : ''}
+          </span>
+        );
+      },
     },
     { key: 'operator', header: '操作人', width: '100px' },
     {
@@ -276,13 +314,15 @@ export default function ViolationsPage() {
         </Select>
         <Select value={actionFilter} onValueChange={(v) => { setActionFilter(v ?? ''); setPage(1); }}>
           <SelectTrigger>
-            <span className="text-sm">{{ '': '全部处置', move: '移帖', delete: '删帖', delete_comment: '删评论' }[actionFilter] || '全部处置'}</span>
+            <span className="text-sm">{{ '': '全部处置', move: '移帖', delete: '删帖', delete_comment: '删评论', delete_reply: '删评论', none: '未处理' }[actionFilter] || '全部处置'}</span>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="">全部处置</SelectItem>
             <SelectItem value="move">移帖</SelectItem>
             <SelectItem value="delete">删帖</SelectItem>
             <SelectItem value="delete_comment">删评论</SelectItem>
+            <SelectItem value="delete_reply">删回复</SelectItem>
+            <SelectItem value="none">未处理</SelectItem>
           </SelectContent>
         </Select>
         <Select value={operatorFilter} onValueChange={(v) => { setOperatorFilter(v ?? ''); setPage(1); }}>
