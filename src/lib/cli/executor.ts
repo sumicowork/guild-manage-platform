@@ -52,8 +52,8 @@ interface IdentityRateLimitState {
 }
 const _identityStates = new Map<string, IdentityRateLimitState>();
 
-// ── Round-robin 计数器 ────────────────────────────────────
-let _roundRobinIndex = 0;
+// ── Round-robin 计数器（按 delayKey 独立，评论和详情各自 RR 不互抢身份）──
+const _roundRobinIndex = new Map<string, number>();
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -141,16 +141,18 @@ function markIdentityAuthFailed(id: bigint | number): void {
  * Round-robin 选择一个不在冷却中且未失效的身份。
  * 全部冷却时选冷却最快到期的。
  */
-async function autoSelectIdentity(): Promise<PoolIdentity | null> {
+async function autoSelectIdentity(delayKey: string): Promise<PoolIdentity | null> {
   const pool = await getIdentityPool();
   if (pool.length === 0) return null;
 
+  const rrIdx = _roundRobinIndex.get(delayKey) || 0;
+
   // 从 round-robin 起点开始，找不在冷却中的身份
   for (let i = 0; i < pool.length; i++) {
-    const idx = (_roundRobinIndex + i) % pool.length;
+    const idx = (rrIdx + i) % pool.length;
     const candidate = pool[idx];
     if (!isIdentityInCooldown(candidate.id)) {
-      _roundRobinIndex = idx + 1; // 下次从下一个开始
+      _roundRobinIndex.set(delayKey, idx + 1); // 下次从下一个开始
       return candidate;
     }
   }
@@ -349,7 +351,7 @@ export async function executeCli(
   let currentIdentityId: bigint | number | null = adminIdentityId ?? null;
 
   if (!currentIdentityId) {
-    const selected = await autoSelectIdentity();
+    const selected = await autoSelectIdentity(delayKey);
     if (selected) {
       currentIdentityId = selected.id;
       console.log(`[CLI] Round-robin selected identity ${currentIdentityId} (${selected.nickname})`);
