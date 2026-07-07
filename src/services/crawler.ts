@@ -776,6 +776,7 @@ export async function runUpdateCrawl(
     let consecutiveCleanPages = 0;
     let pageCount = 0;
     const changedFeedIds: string[] = [];
+    const newFeedIds: string[] = [];
     const allSeenFeedIds = new Set<string>();
     const feedChannelMap: Record<string, string> = {}; // feed_id → channel_id
     let oldestSeenTime: number | null = null; // 扫描范围的最老帖子时间戳
@@ -817,6 +818,7 @@ export async function runUpdateCrawl(
             // New feed
             await upsertFeed(feed, undefined, channelNameToId);
             stats.newFeeds++;
+            newFeedIds.push(feed.feed_id);
             pageHasChanges = true;
 
             // ── Auto-rule enforcement: check if this feed should be auto-handled ──
@@ -1089,9 +1091,9 @@ export async function runUpdateCrawl(
       log(taskId, "Phase 3: Skipped (no feeds scanned)");
     }
 
-    await updateTaskStats(taskId, { ...stats, phase: "completed" });
-    await updateTaskStatus(taskId, "completed");
     log(taskId, `Update crawl completed. Stats: ${JSON.stringify(stats)}`);
+    await updateTaskStats(taskId, { ...stats, phase: "completed", changedFeedIds, newFeedIds });
+    await updateTaskStatus(taskId, "completed");
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`[Crawler] Update crawl failed:`, err);
