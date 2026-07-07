@@ -321,7 +321,7 @@ export default function ViolationsPage() {
             <SelectItem value="move">移帖</SelectItem>
             <SelectItem value="delete">删帖</SelectItem>
             <SelectItem value="delete_comment">删评论</SelectItem>
-            <SelectItem value="delete_reply">删回复</SelectItem>
+            <SelectItem value="delete_reply">删评论</SelectItem>
             <SelectItem value="none">未处理</SelectItem>
           </SelectContent>
         </Select>
