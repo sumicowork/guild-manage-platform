@@ -113,21 +113,37 @@ function sanitizeText(v: string | null | undefined): string | null | undefined {
   return v.includes("\x00") ? v.replace(/\x00/g, "") : v;
 }
 
-/** Strip null bytes from all text fields of a raw CLI object */
+/** Strip null bytes from all string values nested inside a JSON object */
+function sanitizeJson(v: any): any {
+  if (v == null || typeof v !== "object") return v;
+  try {
+    const s = JSON.stringify(v);
+    if (!s.includes("\x00")) return v;
+    return JSON.parse(s.replace(/\x00/g, ""));
+  } catch {
+    return v;
+  }
+}
+
+/** Strip null bytes from all text/JSON fields of a raw CLI object */
 function sanitizeFeedData(feed: any) {
   for (const key of ["author", "author_id", "channel_name", "title", "content_snippet", "feed_type"]) {
     if (typeof feed[key] === "string") feed[key] = sanitizeText(feed[key]);
   }
+  if (feed.content != null) feed.content = sanitizeJson(feed.content);
+  if (feed.images != null) feed.images = sanitizeJson(feed.images);
 }
 function sanitizeCommentData(c: any) {
   for (const key of ["author", "author_id", "content_text"]) {
     if (typeof c[key] === "string") c[key] = sanitizeText(c[key]);
   }
+  if (c.content != null) c.content = sanitizeJson(c.content);
 }
 function sanitizeReplyData(r: any) {
   for (const key of ["author", "author_id", "content_text", "target_user", "target_user_id"]) {
     if (typeof r[key] === "string") r[key] = sanitizeText(r[key]);
   }
+  if (r.content != null) r.content = sanitizeJson(r.content);
 }
 
 // ─── Upsert helpers (batch-safe) ──────────────────────────────────────
