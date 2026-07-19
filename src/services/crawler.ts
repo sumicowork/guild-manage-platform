@@ -977,119 +977,125 @@ export async function runUpdateCrawl(
       `Phase 1 complete: ${stats.newFeeds} new feeds, ${stats.updatedFeeds} changed. Fetching comments for ${changedFeedIds.length} feeds.`
     );
     recordPhaseEnd("scan");
-    // ── Phase 2: Fetch comments for changed feeds (single worker to avoid 153) ──
+    // ── Phase 2+2.5: Comments and Details in parallel ──
+    // Comments use a different CLI command than details → independent rate limits → safe to run in parallel.
     if (changedFeedIds.length > 0) {
-      log(taskId, "Phase 2: Fetching comments for changed feeds...");
-      recordPhaseStart("comments");
-    recordPhaseTotal("comments", changedFeedIds.length);
-    const WORKER_COUNT = 1; // 单 worker 顺序执行，避免触发 153 限流
-      recordPhaseTotal("comments", changedFeedIds.length);
-      const chunks: string[][] = Array.from({ length: WORKER_COUNT }, () => []);
-      changedFeedIds.forEach((id, i) => chunks[i % WORKER_COUNT].push(id));
+      log(taskId, `Phase 2+2.5: Fetching comments and details for ${changedFeedIds.length} changed feeds in parallel...`);
 
-      const workers = chunks.map(async (chunk, workerIdx) => {
-        let feedIdx = 0;
-        for (const feedId of chunk) {
-          feedIdx++;
-          recordPhaseCall("comments", feedIdx);
-          await updateTaskStats(taskId, { ...stats, phase: "comments" });
-          checkAbort(signal, taskId);
-          try {
-            let commentCursor = "";
-            while (true) {
+      await Promise.all([
+        // ── Phase 2: Fetch comments (single worker — avoid 153 on comments API) ──
+        (async () => {
+          recordPhaseStart("comments");
+          recordPhaseTotal("comments", changedFeedIds.length);
+          const WORKER_COUNT = 1; // 单 worker 顺序执行，避免触发 153 限流
+          const chunks: string[][] = Array.from({ length: WORKER_COUNT }, () => []);
+          changedFeedIds.forEach((id, i) => chunks[i % WORKER_COUNT].push(id));
+
+          const workers = chunks.map(async (chunk, workerIdx) => {
+            let feedIdx = 0;
+            for (const feedId of chunk) {
+              feedIdx++;
+              recordPhaseCall("comments", feedIdx);
+              await updateTaskStats(taskId, { ...stats, phase: "comments" });
               checkAbort(signal, taskId);
-              const commentPage = await getFeedComments(feedId, gid, commentCursor, adminIdentityId);
-              if (!commentPage.comments || commentPage.comments.length === 0) break;
+              try {
+                let commentCursor = "";
+                while (true) {
+                  checkAbort(signal, taskId);
+                  const commentPage = await getFeedComments(feedId, gid, commentCursor, adminIdentityId);
+                  if (!commentPage.comments || commentPage.comments.length === 0) break;
 
-              for (const comment of commentPage.comments) {
-                try {
-                  await upsertComment(comment, feedId);
-                  stats.commentsAdded++;
+                  for (const comment of commentPage.comments) {
+                    try {
+                      await upsertComment(comment, feedId);
+                      stats.commentsAdded++;
 
-                  if (comment.replies_preview && Array.isArray(comment.replies_preview)) {
-                    for (const reply of comment.replies_preview) {
-                      try {
-                        await upsertReply(reply, comment.comment_id, feedId);
-                      } catch {
-                        stats.errors++;
+                      if (comment.replies_preview && Array.isArray(comment.replies_preview)) {
+                        for (const reply of comment.replies_preview) {
+                          try {
+                            await upsertReply(reply, comment.comment_id, feedId);
+                          } catch {
+                            stats.errors++;
+                          }
+                        }
                       }
+
+                      // Fetch remaining sub-replies via pagination if has_more_replies
+                      if (comment.has_more_replies) {
+                        const channelId = feedChannelMap[feedId];
+                        if (channelId) {
+                          await fetchAllRepliesForComment(
+                            feedId,
+                            comment,
+                            gid,
+                            channelId,
+                            async (reply) => {
+                              await upsertReply(reply, comment.comment_id, feedId);
+                              stats.commentsAdded++;
+                            },
+                            adminIdentityId
+                          );
+                        }
+                      }
+                    } catch {
+                      stats.errors++;
                     }
                   }
 
-                  // Fetch remaining sub-replies via pagination if has_more_replies
-                  if (comment.has_more_replies) {
-                    const channelId = feedChannelMap[feedId];
-                    if (channelId) {
-                      await fetchAllRepliesForComment(
-                        feedId,
-                        comment,
-                        gid,
-                        channelId,
-                        async (reply) => {
-                          await upsertReply(reply, comment.comment_id, feedId);
-                          stats.commentsAdded++;
-                        },
-                        adminIdentityId
-                      );
-                    }
-                  }
-                } catch {
-                  stats.errors++;
+                  if (!commentPage.hasMore || !commentPage.nextCursor) break;
+                  commentCursor = commentPage.nextCursor;
                 }
+              } catch (err) {
+                stats.errors++;
+                console.error(`[Crawler][Worker ${workerIdx}] Failed comments for ${feedId}:`, err);
               }
-
-              if (!commentPage.hasMore || !commentPage.nextCursor) break;
-              commentCursor = commentPage.nextCursor;
             }
-          } catch (err) {
-            stats.errors++;
-            console.error(`[Crawler][Worker ${workerIdx}] Failed comments for ${feedId}:`, err);
-          }
-        }
-      });
+          });
 
-      await Promise.all(workers);
-      log(taskId, `Phase 2 complete: ${stats.commentsAdded} comments added`);
-      recordPhaseEnd("comments");
-    }
+          await Promise.all(workers);
+          log(taskId, `Phase 2 complete: ${stats.commentsAdded} comments added`);
+          recordPhaseEnd("comments");
+        })(),
 
-    // ── Phase 2.5: Fetch details for all changed feeds (parallel workers) ──
-    if (changedFeedIds.length > 0) {
-      const DETAIL_WORKERS = 3;
-      recordPhaseStart("details");
-      recordPhaseTotal("details", changedFeedIds.length);
-      log(taskId, `Phase 2.5: Fetching details for ${changedFeedIds.length} changed feeds with ${DETAIL_WORKERS} parallel workers...`);
-      
-      stats.detailsTotal = 0;
-      const detailChunks: string[][] = Array.from({ length: DETAIL_WORKERS }, () => []);
-      changedFeedIds.forEach((id, i) => detailChunks[i % DETAIL_WORKERS].push(id));
-      
-      await Promise.all(detailChunks.map((chunk) => (async () => {
-        for (const feedId of chunk) {
-          checkAbort(signal, taskId);
-          try {
-            const detail = await getFeedDetail(feedId, gid, adminIdentityId);
-            if (detail && detail.content) {
-              await prisma.feed.update({
-                where: { feed_id: feedId },
-                data: {
-                  content: detail.content,
-                  share_url: detail.share_url || undefined,
-                  feed_type: detail.feed_type || undefined,
-                },
-              });
-              stats.detailsTotal++;
-              recordPhaseCall("details", stats.detailsTotal);
+        // ── Phase 2.5: Fetch details (3 parallel workers — details API never hits 153) ──
+        (async () => {
+          const DETAIL_WORKERS = 3;
+          recordPhaseStart("details");
+          recordPhaseTotal("details", changedFeedIds.length);
+          log(taskId, `Phase 2.5: Fetching details with ${DETAIL_WORKERS} parallel workers...`);
+
+          stats.detailsTotal = 0;
+          const detailChunks: string[][] = Array.from({ length: DETAIL_WORKERS }, () => []);
+          changedFeedIds.forEach((id, i) => detailChunks[i % DETAIL_WORKERS].push(id));
+
+          await Promise.all(detailChunks.map((chunk) => (async () => {
+            for (const feedId of chunk) {
+              checkAbort(signal, taskId);
+              try {
+                const detail = await getFeedDetail(feedId, gid, adminIdentityId);
+                if (detail && detail.content) {
+                  await prisma.feed.update({
+                    where: { feed_id: feedId },
+                    data: {
+                      content: detail.content,
+                      share_url: detail.share_url || undefined,
+                      feed_type: detail.feed_type || undefined,
+                    },
+                  });
+                  stats.detailsTotal++;
+                  recordPhaseCall("details", stats.detailsTotal);
+                }
+              } catch (err) {
+                console.error(`[Crawl] Failed to fetch detail for ${feedId}:`, err);
+              }
+              await updateTaskStats(taskId, { ...stats, phase: "details" });
             }
-          } catch (err) {
-            console.error(`[Crawl] Failed to fetch detail for ${feedId}:`, err);
-          }
-          await updateTaskStats(taskId, { ...stats, phase: "details" });
-        }
-      })));
-      
-      recordPhaseEnd("details");
-      log(taskId, `Phase 2.5 complete: ${stats.detailsTotal} details fetched/updated`);
+          })));
+
+          recordPhaseEnd("details");
+          log(taskId, `Phase 2.5 complete: ${stats.detailsTotal} details fetched/updated`);
+        })(),
+      ]);
     }
 
     // ── Phase 3: Deletion detection（仅限扫描范围内）──
