@@ -481,7 +481,7 @@ export async function runFullCrawl(
 
     while (true) {
       checkAbort(signal, taskId);
-      const page = await getGuildFeeds(gid, cursor, 2000, 2, adminIdentityId);
+      const page = await getGuildFeeds(gid, cursor, 500, 2, adminIdentityId);
       if (!page.feeds || page.feeds.length === 0) break;
 
       // Sanitize immediately before any DB interaction
@@ -815,7 +815,7 @@ export async function runUpdateCrawl(
       recordPhaseCall("scan", pageCount);
       recordPhaseTotal("scan", pageCount);
       await updateTaskStats(taskId, { ...stats, phase: "scan" });
-      const page = await getGuildFeeds(gid, cursor, 2000, 2, adminIdentityId);
+      const page = await getGuildFeeds(gid, cursor, 500, 2, adminIdentityId);
 
       // Sanitize immediately before any DB interaction
       for (const feed of page.feeds) sanitizeObject(feed);
