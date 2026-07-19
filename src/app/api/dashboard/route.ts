@@ -79,41 +79,44 @@ export async function GET(req: NextRequest) {
     ]);
 
     // ── Additional queries using real post time (create_time), not crawler insert time ──
+    // create_time is stored as UTC in a timestamp-without-tz column.
+    // To convert to Beijing time: must double-wrap — AT TIME ZONE 'UTC' (declare storage) then AT TIME ZONE 'Asia/Shanghai' (target).
+    // Single AT TIME ZONE 'Asia/Shanghai' would be interpreted as "this value IS already Shanghai time" and shift the wrong way.
+
+    const trendCutoff = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+    const hourlyCutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
 
     // 30-day per-day feed counts (by post time, Beijing timezone)
     const feedTrendRaw = await prisma.$queryRawUnsafe<
       Array<{ dt: string; n: bigint }>
     >(
-      `SELECT (create_time AT TIME ZONE 'Asia/Shanghai')::date::text as dt, COUNT(*)::bigint as n
+      `SELECT (create_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai')::date::text as dt, COUNT(*)::bigint as n
        FROM feeds
-       WHERE create_time >= (DATE_TRUNC('day', NOW() AT TIME ZONE 'Asia/Shanghai') - INTERVAL '29 days')
-         AT TIME ZONE 'Asia/Shanghai'
-         AND create_time IS NOT NULL
+       WHERE create_time >= $1::timestamp AND create_time IS NOT NULL
        GROUP BY dt ORDER BY dt`,
+      trendCutoff,
     );
 
     // 30-day per-day comment counts (by post time, Beijing timezone)
     const commentTrendRaw = await prisma.$queryRawUnsafe<
       Array<{ dt: string; n: bigint }>
     >(
-      `SELECT (create_time AT TIME ZONE 'Asia/Shanghai')::date::text as dt, COUNT(*)::bigint as n
+      `SELECT (create_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai')::date::text as dt, COUNT(*)::bigint as n
        FROM comments
-       WHERE create_time >= (DATE_TRUNC('day', NOW() AT TIME ZONE 'Asia/Shanghai') - INTERVAL '29 days')
-         AT TIME ZONE 'Asia/Shanghai'
-         AND create_time IS NOT NULL
+       WHERE create_time >= $1::timestamp AND create_time IS NOT NULL
        GROUP BY dt ORDER BY dt`,
+      trendCutoff,
     );
 
     // Hourly activity — last 24h feeds by post time in Beijing timezone
     const hourlyRaw = await prisma.$queryRawUnsafe<
       Array<{ hr: number; n: bigint }>
     >(
-      `SELECT EXTRACT(HOUR FROM create_time AT TIME ZONE 'Asia/Shanghai')::int as hr, COUNT(*)::bigint as n
+      `SELECT EXTRACT(HOUR FROM (create_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai'))::int as hr, COUNT(*)::bigint as n
        FROM feeds
-       WHERE create_time >= (NOW() AT TIME ZONE 'Asia/Shanghai' - INTERVAL '24 hours')
-         AT TIME ZONE 'Asia/Shanghai'
-         AND create_time IS NOT NULL
+       WHERE create_time >= $1::timestamp AND create_time IS NOT NULL
        GROUP BY hr ORDER BY hr`,
+      hourlyCutoff,
     );
 
     // Top 10 feed + comment authors (active status only)
