@@ -53,3 +53,5 @@ login.json
 debug.log
 logs/
 scripts/probe-153.ts
+scripts/export/
+scripts/_*.cjs
