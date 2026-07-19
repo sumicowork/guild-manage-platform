@@ -802,7 +802,6 @@ export async function runUpdateCrawl(
     recordPhaseStart("scan");
 
     // Scan is sequential single-threaded — pick one identity and reuse for all pages.
-    // Avoids per-page autoSelectIdentity DB query + switchToIdentity file I/O.
     let scanIdentityId = adminIdentityId;
     if (!scanIdentityId) {
       const firstIdentity = await prisma.adminIdentity.findFirst({
@@ -813,22 +812,88 @@ export async function runUpdateCrawl(
       if (firstIdentity) scanIdentityId = Number(firstIdentity.id);
     }
 
+    // ── Load cached cursors from previous completed scan ──
+    let savedCursors: Array<{ page: number; cursor: string }> = [];
+    try {
+      const lastCompleted = await prisma.crawlTask.findFirst({
+        where: { task_type: "update", status: "completed" },
+        orderBy: { created_at: "desc" },
+        select: { stats: true },
+      });
+      const lastStats = (lastCompleted?.stats || {}) as Record<string, any>;
+      if (Array.isArray(lastStats.cursors) && lastStats.cursors.length > 0) {
+        savedCursors = lastStats.cursors;
+        log(taskId, `Found ${savedCursors.length} cached cursors from previous scan: ${savedCursors.map(c => `p${c.page}`).join(", ")}`);
+      }
+    } catch (e) {
+      // If stats JSON is corrupted, just proceed without cached cursors
+    }
+
     let cursor = "";
     let pageCount = 0;
     const changedFeedIds: string[] = [];
     const newFeedIds: string[] = [];
     const allSeenFeedIds = new Set<string>();
-    const feedChannelMap: Record<string, string> = {}; // feed_id → channel_id
-    let oldestSeenTime: number | null = null; // 扫描范围的最老帖子时间戳
+    const feedChannelMap: Record<string, string> = {};
+    let oldestSeenTime: number | null = null;
 
-    // 无页数/干净页限制 — 一直扫到 API 无下一页为止
+    // Cursor snapshots for next scan — save every 10 pages
+    const thisScanCursors: Array<{ page: number; cursor: string }> = [];
+
+    // ── Parallel workers from cached cursors ──
+    // Each worker scans from its saved cursor forward. Both main and workers collect
+    // feed IDs into allSeenFeedIds. When main thread catches up to worker territory
+    // (feed_id overlap detected), main skips the rest and waits for workers.
+    const parallelFeedIds = new Set<string>(); // IDs seen by workers
+    const workerPromises: Promise<void>[] = [];
+    if (savedCursors.length > 0) {
+      for (const entry of savedCursors) {
+        workerPromises.push((async () => {
+          log(taskId, `[CursorWorker p${entry.page}] Starting from cached cursor...`);
+          let wCursor = entry.cursor;
+          let wPage = 0;
+          try {
+            while (true) {
+              checkAbort(signal, taskId);
+              const page = await getGuildFeeds(gid, wCursor, 1000, 2, scanIdentityId);
+              if (!page.feeds || page.feeds.length === 0) break;
+
+              // If any feed on this page was already seen by main thread, we overlapped — stop
+              if ((page.feeds as any[]).some((f: any) => allSeenFeedIds.has(f.feed_id) && !parallelFeedIds.has(f.feed_id))) {
+                log(taskId, `[CursorWorker p${entry.page}] Overlapped with main thread — stopping`);
+                break;
+              }
+
+              for (const feed of page.feeds) {
+                sanitizeObject(feed);
+                const fid = feed.feed_id;
+                parallelFeedIds.add(fid);
+                allSeenFeedIds.add(fid);
+                if (feed.channel_id) feedChannelMap[fid] = String(feed.channel_id);
+                const t = feed.create_time_raw;
+                if (typeof t === "number" && (oldestSeenTime === null || t < oldestSeenTime)) oldestSeenTime = t;
+              }
+
+              wPage++;
+              if (!page.nextCursor) break;
+              wCursor = page.nextCursor;
+            }
+          } catch (err) {
+            log(taskId, `[CursorWorker p${entry.page}] Failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+          log(taskId, `[CursorWorker p${entry.page}] Scanned ${wPage} extra pages`);
+        })());
+      }
+    }
+
+    // ── Main scan loop (newest feeds → older) ──
     while (true) {
       checkAbort(signal, taskId);
       pageCount++;
       recordPhaseCall("scan", pageCount);
       recordPhaseTotal("scan", pageCount);
       await updateTaskStats(taskId, { ...stats, phase: "scan" });
-      const page = await getGuildFeeds(gid, cursor, 5000, 2, scanIdentityId);
+      const page = await getGuildFeeds(gid, cursor, 1000, 2, scanIdentityId);
 
       // Sanitize immediately before any DB interaction
       for (const feed of page.feeds) sanitizeObject(feed);
@@ -997,9 +1062,29 @@ export async function runUpdateCrawl(
         `Feed scan (page ${pageCount}): ${stats.newFeeds} new, ${stats.updatedFeeds} updated`
       );
 
+      // Save cursor snapshot every 10 pages for next scan's parallel workers
+      if (pageCount % 10 === 0 && page.nextCursor) {
+        thisScanCursors.push({ page: pageCount, cursor: page.nextCursor });
+      }
+
+      // Overlap detection: if parallel workers have already seen feeds on this page, they covered the rest
+      if (parallelFeedIds.size > 0 && page.feeds.some((f: any) => parallelFeedIds.has(f.feed_id))) {
+        log(taskId, `Main thread overlapped with parallel workers at page ${pageCount} — all feeds covered`);
+        break;
+      }
+
       if (!page.nextCursor) break;
       cursor = page.nextCursor;
     }
+
+    // Wait for parallel workers to finish
+    if (workerPromises.length > 0) {
+      log(taskId, "Waiting for parallel cursor workers to finish...");
+      await Promise.all(workerPromises);
+    }
+
+    // Save cursor snapshots for next scan
+    stats.cursors = thisScanCursors;
 
     log(
       taskId,
