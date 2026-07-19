@@ -107,9 +107,34 @@ function extractContentText(content: any): string | null {
   return null;
 }
 
+/** Sanitize a value for PostgreSQL — strip null bytes which are invalid UTF-8 */
+function sanitizeText(v: string | null | undefined): string | null | undefined {
+  if (v == null) return v;
+  return v.includes("\x00") ? v.replace(/\x00/g, "") : v;
+}
+
+/** Strip null bytes from all text fields of a raw CLI object */
+function sanitizeFeedData(feed: any) {
+  for (const key of ["author", "author_id", "channel_name", "title", "content_snippet", "feed_type"]) {
+    if (typeof feed[key] === "string") feed[key] = sanitizeText(feed[key]);
+  }
+}
+function sanitizeCommentData(c: any) {
+  for (const key of ["author", "author_id", "content_text"]) {
+    if (typeof c[key] === "string") c[key] = sanitizeText(c[key]);
+  }
+}
+function sanitizeReplyData(r: any) {
+  for (const key of ["author", "author_id", "content_text", "target_user", "target_user_id"]) {
+    if (typeof r[key] === "string") r[key] = sanitizeText(r[key]);
+  }
+}
+
 // ─── Upsert helpers (batch-safe) ──────────────────────────────────────
 
 async function upsertFeed(feed: any, detail?: any, channelNameToId?: Map<string, string>): Promise<void> {
+  sanitizeFeedData(feed);
+  if (detail) sanitizeFeedData(detail);
   const createTime = parseDateTime(feed.create_time);
   const createTimeRaw = toBigInt(feed.create_time_raw);
 
@@ -163,6 +188,7 @@ async function upsertFeed(feed: any, detail?: any, channelNameToId?: Map<string,
 }
 
 async function upsertComment(comment: any, feedId: string): Promise<void> {
+  sanitizeCommentData(comment);
   const createTime = parseDateTime(comment.create_time);
   const createTimeRaw = toBigInt(comment.create_time_raw);
   const contentText = extractContentText(comment.content);
@@ -204,6 +230,7 @@ async function upsertReply(
   commentId: string,
   feedId: string
 ): Promise<void> {
+  sanitizeReplyData(reply);
   const createTime = parseDateTime(reply.create_time);
   const createTimeRaw = toBigInt(reply.create_time_raw);
   const contentText = extractContentText(reply.content);
