@@ -696,8 +696,8 @@ export async function runFullCrawl(
 /**
  * Runs an incremental update crawl.
  * - Scans feeds, detects new posts and comment_count changes.
- * - Early terminates after 2 consecutive pages with no changes.
- * - Fetches comments for changed feeds using 3 parallel workers.
+ * - Full-depth scan (no page cap or early termination) — stops only when API cursor ends.
+ * - Fetches comments and details for changed feeds in parallel.
  * - Runs deletion detection after completion.
  */
 export async function runUpdateCrawl(
@@ -718,7 +718,6 @@ export async function runUpdateCrawl(
     newFeeds: 0,
     updatedFeeds: 0,
     commentsAdded: 0,
-    cleanPages: 0,
     errors: 0,
     autoActions: 0,
     timing: {} as Record<string, any>,
@@ -769,11 +768,8 @@ export async function runUpdateCrawl(
   try {
     // ── Phase 1: Scan feeds for changes ──
     log(taskId, "Phase 1: Scanning feeds for changes...");
-    const MAX_SCAN_PAGES = 6; // 增量最多扫 6 页 (3000 条)，对齐 Python 原版
     recordPhaseStart("scan");
-    recordPhaseTotal("scan", MAX_SCAN_PAGES);
     let cursor = "";
-    let consecutiveCleanPages = 0;
     let pageCount = 0;
     const changedFeedIds: string[] = [];
     const newFeedIds: string[] = [];
@@ -781,14 +777,14 @@ export async function runUpdateCrawl(
     const feedChannelMap: Record<string, string> = {}; // feed_id → channel_id
     let oldestSeenTime: number | null = null; // 扫描范围的最老帖子时间戳
 
-    while (consecutiveCleanPages < 2 && pageCount < MAX_SCAN_PAGES) {
+    // 无页数/干净页限制 — 一直扫到 API 无下一页为止
+    while (true) {
       checkAbort(signal, taskId);
       pageCount++;
       recordPhaseCall("scan", pageCount);
+      recordPhaseTotal("scan", pageCount);
       await updateTaskStats(taskId, { ...stats, phase: "scan" });
       const page = await getGuildFeeds(gid, cursor, 500, 2, adminIdentityId);
-
-      let pageHasChanges = false;
 
       for (const feed of page.feeds) {
         allSeenFeedIds.add(feed.feed_id);
@@ -819,7 +815,6 @@ export async function runUpdateCrawl(
             await upsertFeed(feed, undefined, channelNameToId);
             stats.newFeeds++;
             newFeedIds.push(feed.feed_id);
-            pageHasChanges = true;
 
             // ── Auto-rule enforcement: check if this feed should be auto-handled ──
             if (autoRules.length > 0 && feed.author_id) {
@@ -889,7 +884,6 @@ export async function runUpdateCrawl(
             await upsertFeed(feed, undefined, channelNameToId);
             stats.updatedFeeds++;
             changedFeedIds.push(feed.feed_id);
-            pageHasChanges = true;
           } else {
             // ── Change detection: comment_count, channel_name, title, images ──
             let hasChanges = false;
@@ -944,7 +938,6 @@ export async function runUpdateCrawl(
               });
               stats.updatedFeeds++;
               changedFeedIds.push(feed.feed_id);
-              pageHasChanges = true;
             }
           }
           // If feed.comment_count is undefined/null, skip the comparison entirely.
@@ -952,24 +945,13 @@ export async function runUpdateCrawl(
           //   DB=5 ≠ (undefined ?? 0)=0 → changed → upsert skips field → DB stays 5 → loop
         }
 
-      if (pageHasChanges) {
-        consecutiveCleanPages = 0;
-      } else {
-        consecutiveCleanPages++;
-        stats.cleanPages++;
-      }
-
       log(
         taskId,
-        `Feed scan (page ${pageCount}): ${stats.newFeeds} new, ${stats.updatedFeeds} updated, clean pages: ${consecutiveCleanPages}`
+        `Feed scan (page ${pageCount}): ${stats.newFeeds} new, ${stats.updatedFeeds} updated`
       );
 
       if (!page.nextCursor) break;
       cursor = page.nextCursor;
-    }
-
-    if (pageCount >= MAX_SCAN_PAGES) {
-      log(taskId, `Scan hit max page limit (${MAX_SCAN_PAGES} pages), stopping early`);
     }
 
     log(
