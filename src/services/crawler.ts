@@ -828,7 +828,7 @@ export async function runUpdateCrawl(
       recordPhaseCall("scan", pageCount);
       recordPhaseTotal("scan", pageCount);
       await updateTaskStats(taskId, { ...stats, phase: "scan" });
-      const page = await getGuildFeeds(gid, cursor, 1000, 2, scanIdentityId);
+      const page = await getGuildFeeds(gid, cursor, 5000, 2, scanIdentityId);
 
       // Sanitize immediately before any DB interaction
       for (const feed of page.feeds) sanitizeObject(feed);
