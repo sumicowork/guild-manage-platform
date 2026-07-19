@@ -12,9 +12,12 @@ import {
   FileText,
   MessageSquare,
   Users,
+  UserCheck,
   AlertTriangle,
   AlertOctagon,
   TrendingUp,
+  Clock,
+  User,
 } from 'lucide-react';
 import {
   LineChart,
@@ -30,15 +33,19 @@ import {
   BarChart,
   Bar,
   Legend,
+  AreaChart,
+  Area,
 } from 'recharts';
 
 interface DashboardStats {
   totalFeeds: number;
   totalComments: number;
   totalMembers: number;
+  activeMembers: number;
+  todayNewFeeds: number;
+  todayNewComments: number;
   todayViolations: number;
   totalViolations: number;
-  todayNewFeeds: number;
 }
 
 interface ViolationTrend {
@@ -55,6 +62,22 @@ interface ChannelDistribution {
   channel: string;
   feeds: number;
   comments: number;
+}
+
+interface ContentTrend {
+  date: string;
+  feeds: number;
+  comments: number;
+}
+
+interface HourlyActivity {
+  hour: string;
+  count: number;
+}
+
+interface TopAuthor {
+  author: string;
+  count: number;
 }
 
 interface CrawlTaskStatus {
@@ -76,6 +99,10 @@ interface DashboardData {
   violationTrend: ViolationTrend[];
   violationReasons: ViolationReason[];
   channelDistribution: ChannelDistribution[];
+  contentTrend: ContentTrend[];
+  hourlyActivity: HourlyActivity[];
+  topFeedAuthors: TopAuthor[];
+  topCommentAuthors: TopAuthor[];
   lastCrawlTask: CrawlTaskStatus | null;
 }
 
@@ -85,10 +112,12 @@ const statCards = [
   { key: 'totalFeeds', label: '帖子总数', icon: FileText, color: 'text-blue-400' },
   { key: 'totalComments', label: '评论总数', icon: MessageSquare, color: 'text-green-400' },
   { key: 'totalMembers', label: '成员总数', icon: Users, color: 'text-purple-400' },
+  { key: 'activeMembers', label: '活跃成员', icon: UserCheck, color: 'text-emerald-400' },
+  { key: 'todayNewFeeds', label: '今日新增帖', icon: TrendingUp, color: 'text-cyan-400' },
+  { key: 'todayNewComments', label: '今日新增评', icon: MessageSquare, color: 'text-teal-400' },
   { key: 'todayViolations', label: '今日违规', icon: AlertTriangle, color: 'text-yellow-400' },
   { key: 'totalViolations', label: '累计违规', icon: AlertOctagon, color: 'text-red-400' },
-  { key: 'todayNewFeeds', label: '今日新增帖', icon: TrendingUp, color: 'text-cyan-400' },
-];
+] as const;
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -98,7 +127,6 @@ export default function DashboardPage() {
   const hasToken = useCallback(async () => {
     try {
       const data = await api.get<{ identityStatus: string }>('/auth/session');
-      // Check if identity needs setup
       if (data.identityStatus !== 'ready') {
         router.replace('/identity-setup');
         return false;
@@ -138,14 +166,18 @@ export default function DashboardPage() {
     return (
       <DashboardShell>
         <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
-            {Array.from({ length: 6 }).map((_, i) => (
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-8">
+            {Array.from({ length: 8 }).map((_, i) => (
               <Skeleton key={i} className="h-28 rounded-xl bg-gray-100" />
             ))}
           </div>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <Skeleton className="h-80 rounded-xl bg-gray-100" />
             <Skeleton className="h-80 rounded-xl bg-gray-100" />
+          </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Skeleton className="h-64 rounded-xl bg-gray-100" />
+            <Skeleton className="h-64 rounded-xl bg-gray-100" />
           </div>
         </div>
       </DashboardShell>
@@ -155,9 +187,7 @@ export default function DashboardPage() {
   if (!data) {
     return (
       <DashboardShell>
-        <div className="flex h-64 items-center justify-center text-gray-400">
-          暂无数据
-        </div>
+        <div className="flex h-64 items-center justify-center text-gray-400">暂无数据</div>
       </DashboardShell>
     );
   }
@@ -168,14 +198,16 @@ export default function DashboardPage() {
     return num.toLocaleString();
   };
 
+  const formatTime = (t: string) => new Date(t).toLocaleString('zh-CN');
+
   return (
     <DashboardShell>
       <div className="space-y-6">
         {/* Crawl Dashboard */}
         <CrawlDashboard />
 
-        {/* Stat cards */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+        {/* Stat cards — 8 cards, 4x2 on medium+ */}
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           {statCards.map((card) => {
             const Icon = card.icon;
             const value = data.stats[card.key as keyof DashboardStats];
@@ -193,18 +225,139 @@ export default function DashboardPage() {
           })}
         </div>
 
-        {/* Charts row */}
+        {/* Row 1: Content trend + Hourly activity */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {/* Violation trend */}
+          {/* 30-day feed & comment trend */}
+          <Card className="bg-white border-gray-200">
+            <CardHeader>
+              <CardTitle className="text-sm">帖子/评论增长趋势 (近30天)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={260}>
+                <AreaChart data={data.contentTrend}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis
+                    dataKey="date"
+                    stroke="#9ca3af"
+                    fontSize={11}
+                    tickFormatter={(v: string) => v.slice(5)}
+                  />
+                  <YAxis stroke="#9ca3af" fontSize={11} allowDecimals={false} />
+                  <RechartsTooltip
+                    contentStyle={{
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      color: '#111827',
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Area
+                    type="monotone"
+                    dataKey="feeds"
+                    stroke="#3b82f6"
+                    fill="#3b82f620"
+                    strokeWidth={2}
+                    name="帖子"
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="comments"
+                    stroke="#10b981"
+                    fill="#10b98120"
+                    strokeWidth={2}
+                    name="评论"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          {/* 24h hourly activity */}
+          <Card className="bg-white border-gray-200">
+            <CardHeader>
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Clock className="size-4 text-blue-400" />
+                近 24h 分时段活跃度
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={data.hourlyActivity}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="hour" stroke="#9ca3af" fontSize={11} />
+                  <YAxis stroke="#9ca3af" fontSize={11} allowDecimals={false} />
+                  <RechartsTooltip
+                    contentStyle={{
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      color: '#111827',
+                    }}
+                  />
+                  <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]} name="帖子数" />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Row 2: Top authors + Violation trend */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {/* Top authors */}
+          <Card className="bg-white border-gray-200">
+            <CardHeader>
+              <CardTitle className="text-sm flex items-center gap-2">
+                <User className="size-4 text-purple-400" />
+                活跃作者 Top10
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-4">
+                {/* Feed authors */}
+                <div>
+                  <p className="text-xs text-gray-400 mb-2 font-medium">发帖</p>
+                  <div className="space-y-1.5">
+                    {data.topFeedAuthors.map((a, i) => (
+                      <div key={a.author} className="flex items-center justify-between text-xs">
+                        <span className="flex items-center gap-1.5 text-gray-700 truncate max-w-[120px]" title={a.author}>
+                          <span className="text-gray-300 w-4 text-right text-[10px]">{i + 1}</span>
+                          {a.author}
+                        </span>
+                        <span className="text-gray-400 shrink-0">{a.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {/* Comment authors */}
+                <div>
+                  <p className="text-xs text-gray-400 mb-2 font-medium">评论</p>
+                  <div className="space-y-1.5">
+                    {data.topCommentAuthors.map((a, i) => (
+                      <div key={a.author} className="flex items-center justify-between text-xs">
+                        <span className="flex items-center gap-1.5 text-gray-700 truncate max-w-[120px]" title={a.author}>
+                          <span className="text-gray-300 w-4 text-right text-[10px]">{i + 1}</span>
+                          {a.author}
+                        </span>
+                        <span className="text-gray-400 shrink-0">{a.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Violation trend (7-day) */}
           <Card className="bg-white border-gray-200">
             <CardHeader>
               <CardTitle className="text-sm">违规趋势 (近7天)</CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={280}>
+              <ResponsiveContainer width="100%" height={260}>
                 <LineChart data={data.violationTrend}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="date" stroke="#9ca3af" fontSize={12} />
+                  <XAxis dataKey="date" stroke="#9ca3af" fontSize={12} tickFormatter={(v: string) => v.slice(5)} />
                   <YAxis stroke="#9ca3af" fontSize={12} allowDecimals={false} />
                   <RechartsTooltip
                     contentStyle={{
@@ -226,25 +379,30 @@ export default function DashboardPage() {
               </ResponsiveContainer>
             </CardContent>
           </Card>
+        </div>
 
-          {/* Violation reason distribution */}
+        {/* Row 3: Violation reasons + Channel distribution + Last crawl */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {/* Violation reason pie */}
           <Card className="bg-white border-gray-200">
             <CardHeader>
               <CardTitle className="text-sm">违规原因分布</CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={280}>
+              <ResponsiveContainer width="100%" height={240}>
                 <PieChart>
                   <Pie
                     data={data.violationReasons}
                     cx="50%"
                     cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
+                    innerRadius={50}
+                    outerRadius={85}
                     paddingAngle={2}
                     dataKey="count"
                     nameKey="reason"
-                    label={(props: { name?: string; percent?: number }) => `${props.name || ''} ${((props.percent || 0) * 100).toFixed(0)}%`}
+                    label={(props: { name?: string; percent?: number }) =>
+                      `${props.name || ''} ${((props.percent || 0) * 100).toFixed(0)}%`
+                    }
                     labelLine={{ stroke: '#9ca3af' }}
                     fontSize={11}
                   >
@@ -264,20 +422,18 @@ export default function DashboardPage() {
               </ResponsiveContainer>
             </CardContent>
           </Card>
-        </div>
 
-        {/* Channel distribution + Last crawl */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <Card className="bg-white border-gray-200 lg:col-span-2">
+          {/* Channel distribution bar */}
+          <Card className="bg-white border-gray-200 lg:col-span-1">
             <CardHeader>
               <CardTitle className="text-sm">版块分布</CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={280}>
+              <ResponsiveContainer width="100%" height={240}>
                 <BarChart data={data.channelDistribution}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="channel" stroke="#9ca3af" fontSize={12} />
-                  <YAxis stroke="#9ca3af" fontSize={12} allowDecimals={false} />
+                  <XAxis dataKey="channel" stroke="#9ca3af" fontSize={10} angle={-30} textAnchor="end" height={60} />
+                  <YAxis stroke="#9ca3af" fontSize={11} allowDecimals={false} />
                   <RechartsTooltip
                     contentStyle={{
                       backgroundColor: '#ffffff',
@@ -286,7 +442,7 @@ export default function DashboardPage() {
                       color: '#111827',
                     }}
                   />
-                  <Legend wrapperStyle={{ color: '#6b7280', fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Bar dataKey="feeds" fill="#3b82f6" name="帖子" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="comments" fill="#10b981" name="评论" radius={[4, 4, 0, 0]} />
                 </BarChart>
@@ -294,16 +450,17 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
+          {/* Last crawl task */}
           <Card className="bg-white border-gray-200">
             <CardHeader>
               <CardTitle className="text-sm">最近爬取任务</CardTitle>
             </CardHeader>
             <CardContent>
               {data.lastCrawlTask ? (
-                <div className="space-y-3 text-sm">
+                <div className="space-y-2.5 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-500">类型</span>
-                    <span className="text-gray-900">{data.lastCrawlTask.type}</span>
+                    <span className="text-gray-900 font-medium">{data.lastCrawlTask.type}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">状态</span>
@@ -322,10 +479,8 @@ export default function DashboardPage() {
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-500">开始时间</span>
-                    <span className="text-gray-900">
-                      {new Date(data.lastCrawlTask.startedAt).toLocaleString('zh-CN')}
-                    </span>
+                    <span className="text-gray-500">开始</span>
+                    <span className="text-gray-900 text-xs">{formatTime(data.lastCrawlTask.startedAt)}</span>
                   </div>
                   {data.lastCrawlTask.stats && (
                     <>
@@ -343,7 +498,7 @@ export default function DashboardPage() {
                       </div>
                       {data.lastCrawlTask.stats.errors > 0 && (
                         <div className="flex justify-between">
-                          <span className="text-gray-500">错误数</span>
+                          <span className="text-gray-500">错误</span>
                           <span className="text-red-600">{data.lastCrawlTask.stats.errors}</span>
                         </div>
                       )}
@@ -351,9 +506,7 @@ export default function DashboardPage() {
                   )}
                 </div>
               ) : (
-                <div className="flex h-32 items-center justify-center text-gray-400">
-                  暂无爬取任务
-                </div>
+                <div className="flex h-32 items-center justify-center text-gray-400">暂无爬取任务</div>
               )}
             </CardContent>
           </Card>

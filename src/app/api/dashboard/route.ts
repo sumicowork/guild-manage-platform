@@ -10,9 +10,13 @@ export async function GET(req: NextRequest) {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    // Last 7 days range
+    // Last 7 days range for violation trend
     const sevenDaysAgo = new Date(todayStart);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+
+    // Last 30 days range for feed/comment trends
+    const thirtyDaysAgo = new Date(todayStart);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
 
     // Run all aggregate queries in parallel
     const [
@@ -74,41 +78,122 @@ export async function GET(req: NextRequest) {
       }),
     ]);
 
+    // ── Three additional queries that depend on nothing above ──
+
+    // 30-day per-day feed counts
+    const feedTrendRaw = await prisma.$queryRawUnsafe<
+      Array<{ dt: string; n: bigint }>
+    >(
+      `SELECT (created_at AT TIME ZONE 'Asia/Shanghai')::date::text as dt, COUNT(*)::bigint as n
+       FROM feeds WHERE created_at >= $1 AND status = 'active'
+       GROUP BY dt ORDER BY dt`,
+      thirtyDaysAgo.toISOString(),
+    );
+
+    // 30-day per-day comment counts
+    const commentTrendRaw = await prisma.$queryRawUnsafe<
+      Array<{ dt: string; n: bigint }>
+    >(
+      `SELECT (created_at AT TIME ZONE 'Asia/Shanghai')::date::text as dt, COUNT(*)::bigint as n
+       FROM comments WHERE created_at >= $1 AND status = 'active'
+       GROUP BY dt ORDER BY dt`,
+      thirtyDaysAgo.toISOString(),
+    );
+
+    // Hourly activity — last 24h in Beijing time
+    const hourlyRaw = await prisma.$queryRawUnsafe<
+      Array<{ hr: number; n: bigint }>
+    >(
+      `SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'Asia/Shanghai')::int as hr, COUNT(*)::bigint as n
+       FROM feeds WHERE created_at >= (NOW() - INTERVAL '24 hours') AND status = 'active'
+       GROUP BY EXTRACT(HOUR FROM created_at AT TIME ZONE 'Asia/Shanghai')
+       ORDER BY hr`,
+    );
+
+    // Top 10 feed + comment authors (active status only)
+    const topFeedAuthorsRaw = await prisma.$queryRawUnsafe<
+      Array<{ author: string; n: bigint }>
+    >(
+      `SELECT author, COUNT(*)::bigint as n FROM feeds WHERE status = 'active' AND author IS NOT NULL
+       GROUP BY author ORDER BY n DESC LIMIT 10`,
+    );
+
+    const topCommentAuthorsRaw = await prisma.$queryRawUnsafe<
+      Array<{ author: string; n: bigint }>
+    >(
+      `SELECT author, COUNT(*)::bigint as n FROM comments WHERE status = 'active' AND author IS NOT NULL
+       GROUP BY author ORDER BY n DESC LIMIT 10`,
+    );
+
     console.log(`[Dashboard] feeds=${totalFeeds} comments=${totalComments} members=${totalMembers}`);
 
-    // Build violation trend — fill in missing days with 0
+    // ── Build violation trend ──
     const violationTrend: { date: string; count: number }[] = [];
     const violationByDate = new Map<string, number>();
-
     for (const v of last7DaysViolations) {
       const dateKey = v.created_at.toISOString().slice(0, 10);
       violationByDate.set(dateKey, (violationByDate.get(dateKey) || 0) + 1);
     }
-
     for (let i = 0; i < 7; i++) {
       const d = new Date(sevenDaysAgo);
       d.setDate(d.getDate() + i);
       const dateKey = d.toISOString().slice(0, 10);
-      violationTrend.push({
+      violationTrend.push({ date: dateKey, count: violationByDate.get(dateKey) || 0 });
+    }
+
+    // ── Build feed & comment 30-day trends (fill gaps with 0) ──
+    const feedTrendMap = new Map<string, number>(
+      feedTrendRaw.map((r) => [String(r.dt), Number(r.n)])
+    );
+    const commentTrendMap = new Map<string, number>(
+      commentTrendRaw.map((r) => [String(r.dt), Number(r.n)])
+    );
+
+    const contentTrend: { date: string; feeds: number; comments: number }[] = [];
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(thirtyDaysAgo);
+      d.setDate(d.getDate() + i);
+      const dateKey = d.toISOString().slice(0, 10);
+      contentTrend.push({
         date: dateKey,
-        count: violationByDate.get(dateKey) || 0,
+        feeds: feedTrendMap.get(dateKey) || 0,
+        comments: commentTrendMap.get(dateKey) || 0,
       });
     }
 
-    // Build channel distribution — feeds and comments per channel
+    // ── Build hourly activity (fill 0–23 with 0) ──
+    const hourlyMap = new Map<number, number>(
+      hourlyRaw.map((r) => [Number(r.hr), Number(r.n)])
+    );
+    const hourlyActivity: { hour: string; count: number }[] = [];
+    for (let h = 0; h < 24; h++) {
+      hourlyActivity.push({
+        hour: `${String(h).padStart(2, "0")}:00`,
+        count: hourlyMap.get(h) || 0,
+      });
+    }
+
+    // ── Top authors ──
+    const topFeedAuthors = topFeedAuthorsRaw.map((r) => ({
+      author: r.author,
+      count: Number(r.n),
+    }));
+    const topCommentAuthors = topCommentAuthorsRaw.map((r) => ({
+      author: r.author,
+      count: Number(r.n),
+    }));
+
+    // ── Build channel distribution ──
     const channelDistribution = feedsByChannel.map((c) => ({
       channel: c.channel_name || "未分类",
       feeds: c._count.channel_name,
-      comments: 0, // populated below
+      comments: 0,
     }));
-
-    // Get comment count per channel (by joining with feeds table)
     const commentsByChannel = await prisma.$queryRawUnsafe<
       Array<{ channel_name: string; cnt: bigint }>
     >(
       `SELECT COALESCE(f.channel_name, '未分类') as channel_name, COUNT(*) as cnt
-       FROM comments c
-       JOIN feeds f ON c.feed_id = f.feed_id
+       FROM comments c JOIN feeds f ON c.feed_id = f.feed_id
        WHERE c.status = 'active' AND f.status = 'active'
        GROUP BY f.channel_name`
     );
@@ -147,6 +232,10 @@ export async function GET(req: NextRequest) {
         count: v._count.violation_reason,
       })),
       channelDistribution,
+      contentTrend,
+      hourlyActivity,
+      topFeedAuthors,
+      topCommentAuthors,
     });
   } catch (err) {
     console.error("Dashboard error:", err);
