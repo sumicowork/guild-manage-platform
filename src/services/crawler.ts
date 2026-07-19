@@ -1053,36 +1053,43 @@ export async function runUpdateCrawl(
       recordPhaseEnd("comments");
     }
 
-    // ── Phase 2.5: Fetch details for all changed feeds ──
+    // ── Phase 2.5: Fetch details for all changed feeds (parallel workers) ──
     if (changedFeedIds.length > 0) {
+      const DETAIL_WORKERS = 3;
       recordPhaseStart("details");
       recordPhaseTotal("details", changedFeedIds.length);
-      log(taskId, `Phase 2.5: Fetching details for ${changedFeedIds.length} changed feeds...`);
-      let detailsFetched = 0;
-      let detailIdx = 0;
-      for (const feedId of changedFeedIds) {
-        checkAbort(signal, taskId);
-        detailIdx++;
-        try {
-          const detail = await getFeedDetail(feedId, gid, adminIdentityId);
-          if (detail && detail.content) {
-            await prisma.feed.update({
-              where: { feed_id: feedId },
-              data: {
-                content: detail.content,
-                share_url: detail.share_url || undefined,
-                feed_type: detail.feed_type || undefined,
-              },
-            });
-            detailsFetched++;
+      log(taskId, `Phase 2.5: Fetching details for ${changedFeedIds.length} changed feeds with ${DETAIL_WORKERS} parallel workers...`);
+      
+      stats.detailsTotal = 0;
+      const detailChunks: string[][] = Array.from({ length: DETAIL_WORKERS }, () => []);
+      changedFeedIds.forEach((id, i) => detailChunks[i % DETAIL_WORKERS].push(id));
+      
+      await Promise.all(detailChunks.map((chunk) => (async () => {
+        for (const feedId of chunk) {
+          checkAbort(signal, taskId);
+          try {
+            const detail = await getFeedDetail(feedId, gid, adminIdentityId);
+            if (detail && detail.content) {
+              await prisma.feed.update({
+                where: { feed_id: feedId },
+                data: {
+                  content: detail.content,
+                  share_url: detail.share_url || undefined,
+                  feed_type: detail.feed_type || undefined,
+                },
+              });
+              stats.detailsTotal++;
+              recordPhaseCall("details", stats.detailsTotal);
+            }
+          } catch (err) {
+            console.error(`[Crawl] Failed to fetch detail for ${feedId}:`, err);
           }
-          recordPhaseCall("details", detailIdx);
-        } catch (err) {
-          console.error(`[Crawl] Failed to fetch detail for ${feedId}:`, err);
+          await updateTaskStats(taskId, { ...stats, phase: "details" });
         }
-      }
+      })));
+      
       recordPhaseEnd("details");
-      log(taskId, `Phase 2.5 complete: ${detailsFetched} details fetched/updated`);
+      log(taskId, `Phase 2.5 complete: ${stats.detailsTotal} details fetched/updated`);
     }
 
     // ── Phase 3: Deletion detection（仅限扫描范围内）──
