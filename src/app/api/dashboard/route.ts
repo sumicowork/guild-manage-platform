@@ -119,19 +119,25 @@ export async function GET(req: NextRequest) {
       hourlyCutoff,
     );
 
-    // Top 10 feed + comment authors (active status only)
+    const weekCutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+
+    // Top 10 feed + comment authors in the last 7 days
     const topFeedAuthorsRaw = await prisma.$queryRawUnsafe<
       Array<{ author: string; n: bigint }>
     >(
-      `SELECT author, COUNT(*)::bigint as n FROM feeds WHERE status = 'active' AND author IS NOT NULL
+      `SELECT author, COUNT(*)::bigint as n FROM feeds
+       WHERE status = 'active' AND author IS NOT NULL AND create_time >= $1::timestamp
        GROUP BY author ORDER BY n DESC LIMIT 10`,
+      weekCutoff,
     );
 
     const topCommentAuthorsRaw = await prisma.$queryRawUnsafe<
       Array<{ author: string; n: bigint }>
     >(
-      `SELECT author, COUNT(*)::bigint as n FROM comments WHERE status = 'active' AND author IS NOT NULL
+      `SELECT author, COUNT(*)::bigint as n FROM comments
+       WHERE status = 'active' AND author IS NOT NULL AND create_time >= $1::timestamp
        GROUP BY author ORDER BY n DESC LIMIT 10`,
+      weekCutoff,
     );
 
     console.log(`[Dashboard] feeds=${totalFeeds} comments=${totalComments} members=${totalMembers}`);
