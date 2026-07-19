@@ -78,36 +78,42 @@ export async function GET(req: NextRequest) {
       }),
     ]);
 
-    // ── Three additional queries that depend on nothing above ──
+    // ── Additional queries using real post time (create_time), not crawler insert time ──
 
-    // 30-day per-day feed counts
+    // 30-day per-day feed counts (by post time, Beijing timezone)
     const feedTrendRaw = await prisma.$queryRawUnsafe<
       Array<{ dt: string; n: bigint }>
     >(
-      `SELECT (created_at AT TIME ZONE 'Asia/Shanghai')::date::text as dt, COUNT(*)::bigint as n
-       FROM feeds WHERE created_at >= $1 AND status = 'active'
+      `SELECT (create_time AT TIME ZONE 'Asia/Shanghai')::date::text as dt, COUNT(*)::bigint as n
+       FROM feeds
+       WHERE create_time >= (DATE_TRUNC('day', NOW() AT TIME ZONE 'Asia/Shanghai') - INTERVAL '29 days')
+         AT TIME ZONE 'Asia/Shanghai'
+         AND create_time IS NOT NULL
        GROUP BY dt ORDER BY dt`,
-      thirtyDaysAgo.toISOString(),
     );
 
-    // 30-day per-day comment counts
+    // 30-day per-day comment counts (by post time, Beijing timezone)
     const commentTrendRaw = await prisma.$queryRawUnsafe<
       Array<{ dt: string; n: bigint }>
     >(
-      `SELECT (created_at AT TIME ZONE 'Asia/Shanghai')::date::text as dt, COUNT(*)::bigint as n
-       FROM comments WHERE created_at >= $1 AND status = 'active'
+      `SELECT (create_time AT TIME ZONE 'Asia/Shanghai')::date::text as dt, COUNT(*)::bigint as n
+       FROM comments
+       WHERE create_time >= (DATE_TRUNC('day', NOW() AT TIME ZONE 'Asia/Shanghai') - INTERVAL '29 days')
+         AT TIME ZONE 'Asia/Shanghai'
+         AND create_time IS NOT NULL
        GROUP BY dt ORDER BY dt`,
-      thirtyDaysAgo.toISOString(),
     );
 
-    // Hourly activity — last 24h in Beijing time
+    // Hourly activity — last 24h feeds by post time in Beijing timezone
     const hourlyRaw = await prisma.$queryRawUnsafe<
       Array<{ hr: number; n: bigint }>
     >(
-      `SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'Asia/Shanghai')::int as hr, COUNT(*)::bigint as n
-       FROM feeds WHERE created_at >= (NOW() - INTERVAL '24 hours') AND status = 'active'
-       GROUP BY EXTRACT(HOUR FROM created_at AT TIME ZONE 'Asia/Shanghai')
-       ORDER BY hr`,
+      `SELECT EXTRACT(HOUR FROM create_time AT TIME ZONE 'Asia/Shanghai')::int as hr, COUNT(*)::bigint as n
+       FROM feeds
+       WHERE create_time >= (NOW() AT TIME ZONE 'Asia/Shanghai' - INTERVAL '24 hours')
+         AT TIME ZONE 'Asia/Shanghai'
+         AND create_time IS NOT NULL
+       GROUP BY hr ORDER BY hr`,
     );
 
     // Top 10 feed + comment authors (active status only)
