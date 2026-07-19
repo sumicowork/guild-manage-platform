@@ -806,7 +806,7 @@ export async function runUpdateCrawl(
     let scanIdentityId = adminIdentityId;
     if (!scanIdentityId) {
       const firstIdentity = await prisma.adminIdentity.findFirst({
-        where: { token: { not: null } },
+        where: { token: { not: "" } },
         select: { id: true },
         orderBy: { id: "asc" },
       });

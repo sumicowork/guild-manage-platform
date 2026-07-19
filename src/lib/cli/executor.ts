@@ -56,7 +56,7 @@ const _identityStates = new Map<string, IdentityRateLimitState>();
 const _roundRobinIndex = new Map<string, number>();
 
 /** Cache last switched identity to skip repeat credential writes */
-let _lastSwitchedId: bigint | null = null;
+let _lastSwitchedId: bigint | number | null | undefined = null;
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
