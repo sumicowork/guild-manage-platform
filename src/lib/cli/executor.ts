@@ -55,6 +55,9 @@ const _identityStates = new Map<string, IdentityRateLimitState>();
 // ── Round-robin 计数器（按 delayKey 独立，评论和详情各自 RR 不互抢身份）──
 const _roundRobinIndex = new Map<string, number>();
 
+/** Cache last switched identity to skip repeat credential writes */
+let _lastSwitchedId: bigint | null = null;
+
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -360,9 +363,10 @@ export async function executeCli(
     }
   }
 
-  // 切换凭证（写入临时 .env 文件供 CLI 读取）
-  if (currentIdentityId) {
+  // 切换凭证（写入临时 .env 文件供 CLI 读取）— 同身份跳过
+  if (currentIdentityId && currentIdentityId !== _lastSwitchedId) {
     await switchToIdentity(currentIdentityId);
+    _lastSwitchedId = currentIdentityId;
   }
 
   // 构建环境变量（含凭证路径）— let 因为 153 切换时需要重建

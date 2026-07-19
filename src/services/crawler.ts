@@ -481,7 +481,7 @@ export async function runFullCrawl(
 
     while (true) {
       checkAbort(signal, taskId);
-      const page = await getGuildFeeds(gid, cursor, 500, 2, adminIdentityId);
+      const page = await getGuildFeeds(gid, cursor, 1000, 2, adminIdentityId);
       if (!page.feeds || page.feeds.length === 0) break;
 
       // Sanitize immediately before any DB interaction
@@ -800,6 +800,19 @@ export async function runUpdateCrawl(
     // ── Phase 1: Scan feeds for changes ──
     log(taskId, "Phase 1: Scanning feeds for changes...");
     recordPhaseStart("scan");
+
+    // Scan is sequential single-threaded — pick one identity and reuse for all pages.
+    // Avoids per-page autoSelectIdentity DB query + switchToIdentity file I/O.
+    let scanIdentityId = adminIdentityId;
+    if (!scanIdentityId) {
+      const firstIdentity = await prisma.adminIdentity.findFirst({
+        where: { token: { not: null } },
+        select: { id: true },
+        orderBy: { id: "asc" },
+      });
+      if (firstIdentity) scanIdentityId = Number(firstIdentity.id);
+    }
+
     let cursor = "";
     let pageCount = 0;
     const changedFeedIds: string[] = [];
@@ -815,7 +828,7 @@ export async function runUpdateCrawl(
       recordPhaseCall("scan", pageCount);
       recordPhaseTotal("scan", pageCount);
       await updateTaskStats(taskId, { ...stats, phase: "scan" });
-      const page = await getGuildFeeds(gid, cursor, 500, 2, adminIdentityId);
+      const page = await getGuildFeeds(gid, cursor, 1000, 2, scanIdentityId);
 
       // Sanitize immediately before any DB interaction
       for (const feed of page.feeds) sanitizeObject(feed);
