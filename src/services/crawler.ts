@@ -113,44 +113,29 @@ function sanitizeText(v: string | null | undefined): string | null | undefined {
   return v.includes("\x00") ? v.replace(/\x00/g, "") : v;
 }
 
-/** Strip null bytes from all string values nested inside a JSON object */
-function sanitizeJson(v: any): any {
-  if (v == null || typeof v !== "object") return v;
-  try {
-    const s = JSON.stringify(v);
-    if (!s.includes("\x00")) return v;
-    return JSON.parse(s.replace(/\x00/g, ""));
-  } catch {
-    return v;
+/** Deep-clean an arbitrary CLI object: recursively strip null bytes from ALL string properties and nested objects.
+ *  PostgreSQL rejects 0x00 in any text/JSON column, and the error message doesn't always identify the column. */
+function sanitizeObject(obj: any): void {
+  if (obj == null || typeof obj !== "object") return;
+  if (Array.isArray(obj)) {
+    for (const item of obj) sanitizeObject(item);
+    return;
   }
-}
-
-/** Strip null bytes from all text/JSON fields of a raw CLI object */
-function sanitizeFeedData(feed: any) {
-  for (const key of ["author", "author_id", "channel_name", "title", "content_snippet", "feed_type"]) {
-    if (typeof feed[key] === "string") feed[key] = sanitizeText(feed[key]);
+  for (const key of Object.keys(obj)) {
+    const v = obj[key];
+    if (typeof v === "string") {
+      if (v.includes("\x00")) obj[key] = v.replace(/\x00/g, "");
+    } else if (typeof v === "object" && v !== null) {
+      sanitizeObject(v);
+    }
   }
-  if (feed.content != null) feed.content = sanitizeJson(feed.content);
-  if (feed.images != null) feed.images = sanitizeJson(feed.images);
-}
-function sanitizeCommentData(c: any) {
-  for (const key of ["author", "author_id", "content_text"]) {
-    if (typeof c[key] === "string") c[key] = sanitizeText(c[key]);
-  }
-  if (c.content != null) c.content = sanitizeJson(c.content);
-}
-function sanitizeReplyData(r: any) {
-  for (const key of ["author", "author_id", "content_text", "target_user", "target_user_id"]) {
-    if (typeof r[key] === "string") r[key] = sanitizeText(r[key]);
-  }
-  if (r.content != null) r.content = sanitizeJson(r.content);
 }
 
 // ─── Upsert helpers (batch-safe) ──────────────────────────────────────
 
 async function upsertFeed(feed: any, detail?: any, channelNameToId?: Map<string, string>): Promise<void> {
-  sanitizeFeedData(feed);
-  if (detail) sanitizeFeedData(detail);
+  sanitizeObject(feed);
+  if (detail) sanitizeObject(detail);
   const createTime = parseDateTime(feed.create_time);
   const createTimeRaw = toBigInt(feed.create_time_raw);
 
@@ -204,7 +189,7 @@ async function upsertFeed(feed: any, detail?: any, channelNameToId?: Map<string,
 }
 
 async function upsertComment(comment: any, feedId: string): Promise<void> {
-  sanitizeCommentData(comment);
+  sanitizeObject(comment);
   const createTime = parseDateTime(comment.create_time);
   const createTimeRaw = toBigInt(comment.create_time_raw);
   const contentText = extractContentText(comment.content);
@@ -246,7 +231,7 @@ async function upsertReply(
   commentId: string,
   feedId: string
 ): Promise<void> {
-  sanitizeReplyData(reply);
+  sanitizeObject(reply);
   const createTime = parseDateTime(reply.create_time);
   const createTimeRaw = toBigInt(reply.create_time_raw);
   const contentText = extractContentText(reply.content);
@@ -498,6 +483,9 @@ export async function runFullCrawl(
       checkAbort(signal, taskId);
       const page = await getGuildFeeds(gid, cursor, 1000, 2, adminIdentityId);
       if (!page.feeds || page.feeds.length === 0) break;
+
+      // Sanitize immediately before any DB interaction
+      for (const feed of page.feeds) sanitizeObject(feed);
 
       for (const feed of page.feeds) {
         try {
@@ -828,6 +816,9 @@ export async function runUpdateCrawl(
       recordPhaseTotal("scan", pageCount);
       await updateTaskStats(taskId, { ...stats, phase: "scan" });
       const page = await getGuildFeeds(gid, cursor, 1000, 2, adminIdentityId);
+
+      // Sanitize immediately before any DB interaction
+      for (const feed of page.feeds) sanitizeObject(feed);
 
       for (const feed of page.feeds) {
         allSeenFeedIds.add(feed.feed_id);
