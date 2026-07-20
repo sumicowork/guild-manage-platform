@@ -1096,7 +1096,7 @@ export async function runUpdateCrawl(
               checkAbort(signal, taskId);
               try {
                 const detail = await getFeedDetail(feedId, gid, adminIdentityId);
-                if (detail && detail.content) {
+                if (detail) {
                   await prisma.feed.update({
                     where: { feed_id: feedId },
                     data: {

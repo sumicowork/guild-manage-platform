@@ -112,15 +112,13 @@ export async function getFeedDetail(
   feedId: string,
   guildId: string,
   adminIdentityId?: bigint | number | null
-): Promise<FeedDetail> {
+): Promise<FeedDetail | null> {
   const data = await executeCli("feed", "get-feed-detail", {
     feed_id: feedId,
     guild_id: guildId,
   }, adminIdentityId);
 
-  if (!data) {
-    return { content: "", share_url: "", feed_type: 0 };
-  }
+  if (!data) return null;
 
   // CLI wraps response in { feed: {...} }, Python scraper: detail = data.get("feed", data)
   const detail = data.feed || data;
