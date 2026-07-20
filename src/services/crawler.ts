@@ -841,9 +841,9 @@ export async function runUpdateCrawl(
     const thisScanCursors: Array<{ page: number; cursor: string }> = [];
 
     // ── Parallel workers from cached cursors ──
-    // Each worker scans from its saved cursor forward. Both main and workers collect
-    // feed IDs into allSeenFeedIds. When main thread catches up to worker territory
-    // (feed_id overlap detected), main skips the rest and waits for workers.
+    // Each worker scans from its saved cursor forward, doing FULL processing (upsert,
+    // change detection, auto-rule) — same as main thread, just from a different starting
+    // position. Workers share the same stats/changedFeedIds/newFeedIds objects with main.
     const parallelFeedIds = new Set<string>(); // IDs seen by workers
     const workerPromises: Promise<void>[] = [];
     if (savedCursors.length > 0) {
@@ -855,17 +855,19 @@ export async function runUpdateCrawl(
           try {
             while (true) {
               checkAbort(signal, taskId);
-              const page = await getGuildFeeds(gid, wCursor, 1000, 2, scanIdentityId);
-              if (!page.feeds || page.feeds.length === 0) break;
+              const wPageObj = await getGuildFeeds(gid, wCursor, 1000, 2, scanIdentityId);
+              if (!wPageObj.feeds || wPageObj.feeds.length === 0) break;
 
-              // If any feed on this page was already seen by main thread, we overlapped — stop
-              if ((page.feeds as any[]).some((f: any) => allSeenFeedIds.has(f.feed_id) && !parallelFeedIds.has(f.feed_id))) {
+              // Overlap check: if any feed on this page was already seen by main thread
+              // (but not by us), main has caught up — stop.
+              if ((wPageObj.feeds as any[]).some((f: any) => allSeenFeedIds.has(f.feed_id) && !parallelFeedIds.has(f.feed_id))) {
                 log(taskId, `[CursorWorker p${entry.page}] Overlapped with main thread — stopping`);
                 break;
               }
 
-              for (const feed of page.feeds) {
-                sanitizeObject(feed);
+              // ── Full per-page processing (same as main thread) ──
+              for (const feed of wPageObj.feeds) sanitizeObject(feed);
+              for (const feed of wPageObj.feeds) {
                 const fid = feed.feed_id;
                 parallelFeedIds.add(fid);
                 allSeenFeedIds.add(fid);
@@ -873,10 +875,54 @@ export async function runUpdateCrawl(
                 const t = feed.create_time_raw;
                 if (typeof t === "number" && (oldestSeenTime === null || t < oldestSeenTime)) oldestSeenTime = t;
               }
+              const wIds = wPageObj.feeds.map((f: any) => f.feed_id);
+              const wExisting = await prisma.feed.findMany({
+                where: { feed_id: { in: wIds } },
+                select: { feed_id: true, comment_count: true, status: true, channel_name: true, title: true, images: true },
+              });
+              const wMap = new Map(wExisting.map((f) => [f.feed_id, f]));
+              for (const feed of wPageObj.feeds) {
+                const ex = wMap.get(feed.feed_id);
+                if (!ex) {
+                  await upsertFeed(feed, undefined, channelNameToId);
+                  stats.newFeeds++;
+                  newFeedIds.push(feed.feed_id);
+                  if (autoRules.length > 0 && feed.author_id) {
+                    const rule = autoRules.find((r) => r.target_author_id === feed.author_id);
+                    if (rule) {
+                      try {
+                        const fcId = feed.channel_id ? String(feed.channel_id) : channelNameToId.get(feed.channel_name) || "";
+                        const fcTime = feed.create_time_raw ? String(feed.create_time_raw) : "";
+                        let ok = false;
+                        if (rule.action === "delete") { ok = await deletePost(gid, feed.feed_id, fcId, fcTime, adminIdentityId); if (ok) await prisma.feed.update({ where: { feed_id: feed.feed_id }, data: { status: "deleted", deleted_at: new Date() } }); }
+                        else if (rule.action === "move" && rule.target_channel_id) { ok = await movePost(gid, feed.feed_id, rule.target_channel_id, fcId, adminIdentityId); if (ok) await prisma.feed.update({ where: { feed_id: feed.feed_id }, data: { status: "moved" } }); }
+                        if (ok) { stats.autoActions++; log(taskId, `[AutoRule] ${rule.name}: ${rule.action} feed ${feed.feed_id}`); continue; }
+                      } catch (err) { stats.errors++; }
+                    }
+                  }
+                  changedFeedIds.push(feed.feed_id);
+                } else if (ex.status === "deleted") {
+                  await upsertFeed(feed, undefined, channelNameToId);
+                  stats.updatedFeeds++;
+                  changedFeedIds.push(feed.feed_id);
+                } else {
+                  let hasChanges = false;
+                  const updateData: Record<string, any> = {};
+                  if (feed.comment_count !== undefined && feed.comment_count !== null && ex.comment_count !== Number(feed.comment_count)) { updateData.comment_count = Number(feed.comment_count); hasChanges = true; }
+                  if (feed.channel_name !== undefined && feed.channel_name !== null && ex.channel_name !== feed.channel_name) { updateData.channel_name = feed.channel_name; hasChanges = true; }
+                  if (feed.title !== undefined && feed.title !== null && ex.title !== feed.title) { updateData.title = feed.title; hasChanges = true; }
+                  if (feed.images !== undefined && feed.images !== null && JSON.stringify(feed.images) !== JSON.stringify(ex.images)) { updateData.images = feed.images; hasChanges = true; }
+                  if (hasChanges) {
+                    await prisma.feed.update({ where: { feed_id: feed.feed_id }, data: updateData });
+                    stats.updatedFeeds++;
+                    changedFeedIds.push(feed.feed_id);
+                  }
+                }
+              }
 
               wPage++;
-              if (!page.nextCursor) break;
-              wCursor = page.nextCursor;
+              if (!wPageObj.nextCursor) break;
+              wCursor = wPageObj.nextCursor;
             }
           } catch (err) {
             log(taskId, `[CursorWorker p${entry.page}] Failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -884,6 +930,7 @@ export async function runUpdateCrawl(
           log(taskId, `[CursorWorker p${entry.page}] Scanned ${wPage} extra pages`);
         })());
       }
+      log(taskId, `Launched ${workerPromises.length} parallel cursor workers`);
     }
 
     // ── Main scan loop (newest feeds → older) ──
