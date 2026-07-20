@@ -1202,17 +1202,20 @@ export async function runMemberCrawl(
       const page = await getGuildMembers(gid, cursor, 100, adminIdentityId);
       if (!page.members || page.members.length === 0) break;
 
+      // Batch check existing members (N+1 → 1 query per page)
+      const tinyIds = page.members.map((m: any) => m.tinyid);
+      const existingMembers = await prisma.member.findMany({
+        where: { tinyid: { in: tinyIds } },
+        select: { tinyid: true },
+      });
+      const existingSet = new Set(existingMembers.map((m) => m.tinyid));
+
       for (const member of page.members) {
         seenTinyIds.add(member.tinyid);
         try {
-          const existing = await prisma.member.findUnique({
-            where: { tinyid: member.tinyid },
-            select: { id: true },
-          });
           await upsertMember(member);
           stats.membersTotal++;
-          await updateTaskStats(taskId, { ...stats, phase: "members" });
-          if (!existing) stats.newMembers++;
+          if (!existingSet.has(member.tinyid)) stats.newMembers++;
         } catch (err) {
           stats.errors++;
           console.error(`[Crawler] Failed to upsert member ${member.tinyid}:`, err);
@@ -1222,6 +1225,7 @@ export async function runMemberCrawl(
       recordPhaseCall("members", stats.membersTotal);
       pageCount++;
       if (pageCount % 5 === 0) {
+        await updateTaskStats(taskId, { ...stats, phase: "members" });
         log(taskId, `Members: ${stats.membersTotal} (page ${pageCount})`);
       }
 
