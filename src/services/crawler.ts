@@ -916,8 +916,8 @@ export async function runUpdateCrawl(
     const parallelFeedIds = new Set<string>();
     const workerPromises: Promise<void>[] = [];
     if (savedCursors.length > 0) {
-      // Use only the cursor closest to new feeds (smallest page number = earliest in scan)
-      const bestCursor = savedCursors.reduce((a, b) => a.page < b.page ? a : b);
+      // Use the cursor closest to 50% depth for balanced main/worker workload
+      const bestCursor = savedCursors[Math.floor(savedCursors.length / 2)];
       const entry = bestCursor;
       workerPromises.push((async () => {
         log(taskId, `[CursorWorker p${entry.page}] Starting from cached cursor...`);
