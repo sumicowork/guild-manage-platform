@@ -812,17 +812,6 @@ export async function runUpdateCrawl(
     log(taskId, "Phase 1: Scanning feeds for changes...");
     recordPhaseStart("scan");
 
-    // Scan is sequential single-threaded — pick one identity and reuse for all pages.
-    let scanIdentityId = adminIdentityId;
-    if (!scanIdentityId) {
-      const firstIdentity = await prisma.adminIdentity.findFirst({
-        where: { token: { not: "" } },
-        select: { id: true },
-        orderBy: { id: "asc" },
-      });
-      if (firstIdentity) scanIdentityId = Number(firstIdentity.id);
-    }
-
     // ── Load cached cursors from previous completed scan ──
     let savedCursors: Array<{ page: number; cursor: string }> = [];
     try {
@@ -937,7 +926,7 @@ export async function runUpdateCrawl(
         try {
           while (true) {
             checkAbort(signal, taskId);
-            const wPageObj = await getGuildFeeds(gid, wCursor, 1000, 2, scanIdentityId);
+            const wPageObj = await getGuildFeeds(gid, wCursor, 1000, 2, adminIdentityId);
             if (!wPageObj.feeds || wPageObj.feeds.length === 0) break;
 
             // Overlap: if any feed was seen by main but not by workers → main caught up
@@ -967,7 +956,7 @@ export async function runUpdateCrawl(
       recordPhaseTotal("scan", pageCount);
       // Throttle DB writes: only persist stats every 5 pages
       if (pageCount % 5 === 0) await updateTaskStats(taskId, { ...stats, phase: "scan" });
-      const page = await getGuildFeeds(gid, cursor, 1000, 2, scanIdentityId);
+      const page = await getGuildFeeds(gid, cursor, 1000, 2, adminIdentityId);
       if (!page.feeds || page.feeds.length === 0) break;
 
       await processScanPage(page.feeds);
