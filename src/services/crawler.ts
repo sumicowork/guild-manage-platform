@@ -911,31 +911,30 @@ export async function runUpdateCrawl(
     }
 
     // ── Parallel workers from cached cursors ──
-    // Only use the first (earliest) cursor — one worker covers the most range without overlap.
-    // Multiple workers would scan overlapping territory since they can't detect each other's work.
+    // Use ALL saved cursors: each worker scans from its cursor until it hits territory
+    // already covered by another worker or the main thread. With 4+ cursors and
+    // 8-10 identities, each covers ~10 pages — achieving near-linear speedup.
     const parallelFeedIds = new Set<string>();
     const workerPromises: Promise<void>[] = [];
     if (savedCursors.length > 0) {
-      // Use the cursor closest to 50% depth for balanced main/worker workload
-      const bestCursor = savedCursors[Math.floor(savedCursors.length / 2)];
-      const entry = bestCursor;
-      workerPromises.push((async () => {
-        log(taskId, `[CursorWorker p${entry.page}] Starting from cached cursor...`);
-        let wCursor = entry.cursor;
-        let wPage = 0;
-        try {
-          while (true) {
-            checkAbort(signal, taskId);
-            const wPageObj = await getGuildFeeds(gid, wCursor, 1000, 2, adminIdentityId);
-            if (!wPageObj.feeds || wPageObj.feeds.length === 0) break;
+      for (const entry of savedCursors) {
+        workerPromises.push((async () => {
+          log(taskId, `[CursorWorker p${entry.page}] Starting from cached cursor...`);
+          let wCursor = entry.cursor;
+          let wPage = 0;
+          try {
+            while (true) {
+              checkAbort(signal, taskId);
+              const wPageObj = await getGuildFeeds(gid, wCursor, 1000, 2, adminIdentityId);
+              if (!wPageObj.feeds || wPageObj.feeds.length === 0) break;
 
-            // Overlap: if any feed was seen by main but not by workers → main caught up
-            if ((wPageObj.feeds as any[]).some((f: any) => allSeenFeedIds.has(f.feed_id) && !parallelFeedIds.has(f.feed_id))) {
-              log(taskId, `[CursorWorker p${entry.page}] Overlapped — stopping`);
-              break;
-            }
+              // Overlap: if any feed was already seen by anyone (main or another worker) → stop
+              if ((wPageObj.feeds as any[]).some((f: any) => allSeenFeedIds.has(f.feed_id))) {
+                log(taskId, `[CursorWorker p${entry.page}] Overlapped — stopping`);
+                break;
+              }
 
-            await processScanPage(wPageObj.feeds, parallelFeedIds);
+              await processScanPage(wPageObj.feeds, parallelFeedIds);
             wPage++;
             if (!wPageObj.nextCursor) break;
             wCursor = wPageObj.nextCursor;
@@ -945,8 +944,9 @@ export async function runUpdateCrawl(
         }
         log(taskId, `[CursorWorker p${entry.page}] Scanned ${wPage} extra pages`);
       })());
-      log(taskId, `Launched 1 parallel cursor worker from page ${bestCursor.page}`);
     }
+    log(taskId, `Launched ${workerPromises.length} parallel cursor workers`);
+  }
 
     // ── Main scan loop (newest feeds → older) ──
     while (true) {
