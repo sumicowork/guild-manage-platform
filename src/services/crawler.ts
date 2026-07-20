@@ -15,6 +15,9 @@ import path from "path";
 
 const GUILD_ID = process.env.GUILD_ID || "";
 
+/** Throttle SSE emissions: max 1 per task per second to avoid browser ERR_INSUFFICIENT_RESOURCES */
+const _lastSseEmit = new Map<string, number>();
+
 // ─── Cancellation support ────────────────────────────────────────────
 
 /**
@@ -79,7 +82,15 @@ async function updateTaskStats(
     where: { id: taskId },
     data: { stats: stats as any },
   });
-  crawlEvents.emit("update", { taskId: String(taskId), stats });
+  // Throttle SSE emissions — rapid calls (e.g. per-member in member crawl)
+  // would flood the browser with events → ERR_INSUFFICIENT_RESOURCES
+  const key = String(taskId);
+  const now = Date.now();
+  const last = _lastSseEmit.get(key) || 0;
+  if (now - last >= 1000) {
+    _lastSseEmit.set(key, now);
+    crawlEvents.emit("update", { taskId: key, stats });
+  }
 }
 
 /** Update task status */
