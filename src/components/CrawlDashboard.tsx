@@ -74,12 +74,20 @@ export function CrawlDashboard() {
         const stats = task.stats || {};
         const timing = stats.timing as Record<string, any> | undefined;
         const rateLimits = stats.rateLimits as Record<string, number> | undefined;
-        const wallTime = stats.wallTimeSec as number | undefined
-          || (timing ? Math.round((Object.values(timing).reduce((max, t) => Math.max(max, (t.ended || Date.now()) - t.started), 0)) / 1000) : undefined);
-        const elapsed = task.startedAt ? Math.round((Date.now() - new Date(task.startedAt).getTime()) / 1000) : 0;
-        const total153 = rateLimits ? Object.values(rateLimits).reduce((a, b) => a + b, 0) : 0;
         const isRunning = task.status === 'running';
         const isFailed = task.status === 'failed';
+
+        // Wall time from completed task's timing data
+        const wallTime = stats.wallTimeSec as number | undefined
+          || (timing ? Math.round((Object.values(timing).reduce((max, t) => Math.max(max, (t.ended || t.started) - t.started), 0)) / 1000) : undefined);
+
+        // Live elapsed: only count up for genuinely running tasks within expected duration.
+        // If a task has been "running" way beyond normal, it's likely dead (process killed / crash).
+        const elapsed = task.startedAt ? Math.round((Date.now() - new Date(task.startedAt).getTime()) / 1000) : 0;
+        const maxExpectedSec = task.type === 'full' ? 36000 : task.type === 'members' ? 600 : 300;
+        const liveElapsed = (isRunning && elapsed < maxExpectedSec) ? fmtDuration(elapsed) : '';
+        const fallbackWall = !isRunning && wallTime ? fmtDuration(wallTime) : '';
+        const total153 = rateLimits ? Object.values(rateLimits).reduce((a, b) => a + b, 0) : 0;
 
         return (
           <Card key={type} className={
@@ -95,14 +103,16 @@ export function CrawlDashboard() {
                   {isRunning ? '运行中' : isFailed ? '失败' : '已完成'}
                 </span>
                 <span className="ml-auto text-xs font-normal text-gray-400">
-                  {isRunning ? fmtDuration(elapsed) : (wallTime ? fmtDuration(wallTime) : '')}
+                  {liveElapsed || fallbackWall}
                   {total153 > 0 && <span className="ml-1 text-orange-500">⚠153×{total153}</span>}
                 </span>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-1.5">
               {timing && Object.entries(timing).map(([p, t]) => {
-                const dur = ((t.ended || Date.now()) - t.started) / 1000;
+                // If task appears dead, don't count live time — use last known ended or Time since start
+                const now = (isRunning && elapsed < maxExpectedSec) ? Date.now() : (t.ended || t.started);
+                const dur = (now - t.started) / 1000;
                 const avgMs = t.calls > 0 ? dur * 1000 / t.calls : 0;
                 const done = !!t.ended;
                 const hasProgress = (t.total ?? 0) > 0 && t.current != null;

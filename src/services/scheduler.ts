@@ -141,6 +141,18 @@ export async function triggerCrawl(
         }
       } else {
         console.error(`[Scheduler] ${type} crawl task #${taskId} failed:`, err);
+        try {
+          await prisma.crawlTask.update({
+            where: { id: taskId },
+            data: {
+              status: "failed",
+              finished_at: new Date(),
+              error_log: err instanceof Error ? err.message : String(err),
+            },
+          });
+        } catch (updateErr) {
+          console.error(`[Scheduler] Failed to mark task #${taskId} as failed:`, updateErr);
+        }
       }
     } finally {
       runningTasks[type] = false;
