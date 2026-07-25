@@ -42,4 +42,7 @@ jobs:
             rm -rf .next
             tar -xzf next.tar.gz
             rm next.tar.gz
+            # Kill any zombie next-server processes not managed by PM2
+            pkill -f "next-server" 2>/dev/null || true
+            sleep 2
             pm2 restart guild-platform
