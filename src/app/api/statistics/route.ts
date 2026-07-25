@@ -117,6 +117,8 @@ export async function GET(req: NextRequest) {
     });
     const nicknameMap = new Map(authorProfiles.map((m) => [m.tinyid, m.nickname]));
 
+    console.log("[stats-debug] dailyTrend length:", dailyTrend.length, "hourlyActivity length:", hourlyActivity.length, "dailyTrend[0]:", dailyTrend[0]);
+
     return success({
       overview: { dau, wau, mau, stickyRatio: mau > 0 ? Math.round((dau / mau) * 100) : 0 },
       members: { total: totalMembers, active: activeMembers, left: leftMembers, newToday, newThisWeek: newWeek, newThisMonth: newMonth },
