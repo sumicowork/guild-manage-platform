@@ -185,6 +185,7 @@ export default function StatisticsPage() {
                 );
               })}
             </div>
+          </div>
           <div className="flex justify-between mt-2 text-[10px] text-gray-400">
             <span>{stats.dailyTrend[0]?.date?.slice(5)}</span>
             <span>{stats.dailyTrend[stats.dailyTrend.length - 1]?.date?.slice(5)}</span>
