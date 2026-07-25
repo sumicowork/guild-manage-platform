@@ -160,7 +160,7 @@ export default function StatisticsPage() {
         </CardHeader>
         <CardContent className="min-h-[320px]">
           <div className="overflow-x-auto pb-2">
-            <div className="flex items-end gap-px h-56 w-full min-w-[620px]">
+            <div className="flex items-end gap-px h-56 w-full min-w-[620px] relative">
               {stats.dailyTrend.map((d, i) => {
                 const h = trendMax > 0 ? Math.round((d.authors / trendMax) * 100) : 0;
                 return (
@@ -174,16 +174,21 @@ export default function StatisticsPage() {
                       className="w-full rounded-t bg-blue-400 hover:bg-blue-500 transition-colors"
                       style={{ height: Math.max(h, d.authors > 0 ? 2 : 0) + '%' }}
                     />
-                    {selectedDate === i && (
-                      <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-1.5 py-1 rounded whitespace-nowrap z-10 leading-relaxed text-center shadow-lg">
-                        <div>{d.date.slice(5)}</div>
-                        <div className="text-blue-300">DAU {d.authors}</div>
-                        <div>帖{fmtNum(d.feeds)} 评{fmtNum(d.comments)}</div>
-                      </div>
-                    )}
                   </div>
                 );
               })}
+
+              {/* Tooltip - rendered separately, positioned at chart top */}
+              {selectedDate !== null && stats.dailyTrend[selectedDate] && (
+                <div
+                  className="absolute top-0 text-[10px] bg-gray-800 text-white px-2 py-1 rounded whitespace-nowrap z-20 leading-relaxed text-center shadow-lg pointer-events-none"
+                  style={{ left: `calc(${(selectedDate / 31) * 100}% + ${(selectedDate / 31) * 100 < 50 ? 0 : -100}%)` }}
+                >
+                  <div>{stats.dailyTrend[selectedDate].date.slice(5)}</div>
+                  <div className="text-blue-300">DAU {stats.dailyTrend[selectedDate].authors}</div>
+                  <div>帖{fmtNum(stats.dailyTrend[selectedDate].feeds)} 评{fmtNum(stats.dailyTrend[selectedDate].comments)}</div>
+                </div>
+              )}
             </div>
           </div>
           <div className="flex justify-between mt-2 text-[10px] text-gray-400">
