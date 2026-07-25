@@ -18,12 +18,14 @@ import {
   Sliders,
   LogOut,
   Menu,
+  BarChart3,
 } from 'lucide-react';
 
 const navItems = [
   { href: '/', label: '仪表盘', icon: LayoutDashboard },
   { href: '/feeds', label: '内容管理', icon: FileText },
   { href: '/members', label: '成员管理', icon: Users },
+  { href: '/statistics', label: '数据统计', icon: BarChart3 },
   { href: '/violations', label: '违规记录', icon: AlertTriangle },
   { href: '/violations/config', label: '违规配置', icon: Sliders },
   { href: '/crawl', label: '爬取管理', icon: RefreshCw, adminOnly: true },
