@@ -158,9 +158,9 @@ export default function StatisticsPage() {
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">近30天 DAU 趋势（每柱 = 当日活跃人数）</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="min-h-[320px]">
           <div className="overflow-x-auto pb-2">
-            <div className="flex items-end gap-px h-28 w-full min-w-[620px]">
+            <div className="flex items-end gap-px h-56 w-full min-w-[620px]">
               {stats.dailyTrend.map((d, i) => {
                 const h = trendMax > 0 ? Math.round((d.authors / trendMax) * 100) : 0;
                 return (
