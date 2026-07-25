@@ -182,7 +182,12 @@ export default function StatisticsPage() {
               {selectedDate !== null && stats.dailyTrend[selectedDate] && (
                 <div
                   className="absolute top-0 text-[10px] bg-gray-800 text-white px-2 py-1 rounded whitespace-nowrap z-20 leading-relaxed text-center shadow-lg pointer-events-none"
-                  style={{ left: `calc(${(selectedDate / 31) * 100}% + ${(selectedDate / 31) * 100 < 50 ? 0 : -100}%)` }}
+                  style={{
+                    left: `${(selectedDate / Math.max(1, stats.dailyTrend.length - 1)) * 100}%`,
+                    transform: (selectedDate / Math.max(1, stats.dailyTrend.length - 1)) * 100 > 50
+                      ? 'translateX(-100%)'
+                      : 'translateX(0)',
+                  }}
                 >
                   <div>{stats.dailyTrend[selectedDate].date.slice(5)}</div>
                   <div className="text-blue-300">DAU {stats.dailyTrend[selectedDate].authors}</div>
