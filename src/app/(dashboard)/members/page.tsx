@@ -37,6 +37,7 @@ interface Member {
   commentCount: number;
   likeCount: number;
   tags: string[];
+  isActive: boolean;
   avatar?: string;
 }
 
@@ -164,7 +165,13 @@ export default function MembersPage() {
       width: '180px',
       render: (m) => (
         <div className="flex flex-wrap items-center gap-1">
-          {/* System status tag */}
+          {/* Dynamic: active in last 30 days */}
+          {m.isActive && (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-green-300 text-green-700 bg-green-50">
+              活跃
+            </Badge>
+          )}
+          {/* System: left the guild */}
           {m.status === 'left' && (
             <Badge variant="destructive" className="text-[10px] px-1.5 py-0" title={m.leftAt ? `离开: ${new Date(m.leftAt).toLocaleString('zh-CN')}` : ''}>
               已离开

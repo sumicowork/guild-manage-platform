@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
     // Enrich members with post/comment counts
     const memberIds = members.map((m) => m.tinyid);
 
-    const [postCounts, commentCounts] = await Promise.all([
+    const [postCounts, commentCounts, activeFeedIds, activeCommentIds] = await Promise.all([
       prisma.feed.groupBy({
         by: ["author_id"],
         where: { author_id: { in: memberIds } },
@@ -108,8 +108,24 @@ export async function GET(req: NextRequest) {
         where: { author_id: { in: memberIds } },
         _count: { author_id: true },
       }),
+      // Active in last 30 days (feeds)
+      prisma.feed.findMany({
+        where: { author_id: { in: memberIds }, create_time: { gte: new Date(Date.now() - 30 * 86400000) } },
+        select: { author_id: true },
+        distinct: ['author_id'],
+      }),
+      // Active in last 30 days (comments)
+      prisma.comment.findMany({
+        where: { author_id: { in: memberIds }, create_time: { gte: new Date(Date.now() - 30 * 86400000) } },
+        select: { author_id: true },
+        distinct: ['author_id'],
+      }),
     ]);
 
+    const activeSet = new Set([
+      ...activeFeedIds.map((f) => f.author_id),
+      ...activeCommentIds.map((c) => c.author_id),
+    ]);
     const postCountMap = new Map(
       postCounts.map((p) => [p.author_id, p._count.author_id])
     );
@@ -146,6 +162,7 @@ export async function GET(req: NextRequest) {
       feedCount: m.postCount ?? 0,
       likeCount: 0,
       tags: (m.tags || []).map((t: any) => t.tag),
+      isActive: activeSet.has(m.tinyid),
     }));
 
     return success(mapped, {
