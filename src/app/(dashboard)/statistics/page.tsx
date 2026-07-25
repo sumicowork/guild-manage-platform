@@ -39,8 +39,8 @@ export default function StatisticsPage() {
   const [selectedDate, setSelectedDate] = useState<number | null>(null);
 
   useEffect(() => {
-    api.get<{ data: Stats }>('/statistics')
-      .then((r) => setStats(r.data))
+    api.get<Stats>('/statistics')
+      .then((r) => setStats(r))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
