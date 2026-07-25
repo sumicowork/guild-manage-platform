@@ -14,6 +14,8 @@ export async function GET(req: NextRequest) {
     const weekAgo = new Date(today.getTime() - 7 * 86400000);
     const monthAgo = new Date(today.getTime() - 30 * 86400000);
 
+    // ---- Helpers ----
+
     const activeAuthors = async (since: Date) => {
       const [feedAuthors, commentAuthors] = await Promise.all([
         prisma.feed.findMany({ where: { create_time: { gte: since } }, select: { author_id: true }, distinct: ["author_id"] }),
@@ -22,9 +24,65 @@ export async function GET(req: NextRequest) {
       return new Set([...feedAuthors.map((f) => f.author_id), ...commentAuthors.map((c) => c.author_id)]).size;
     };
 
+    /** Fetch feeds + comments for the period, group by day in JS (avoids $queryRaw 500). */
+    const buildDailyTrend = async () => {
+      const [feeds, comments] = await Promise.all([
+        prisma.feed.findMany({ where: { create_time: { gte: monthAgo } }, select: { create_time: true, author_id: true } }),
+        prisma.comment.findMany({ where: { create_time: { gte: monthAgo } }, select: { create_time: true, author_id: true } }),
+      ]);
+
+      const feedsByDay = new Map<string, number>();
+      const commentsByDay = new Map<string, number>();
+      const authorsByDay = new Map<string, Set<string>>();
+
+      for (const f of feeds) {
+        const d = f.create_time!.toISOString().slice(0, 10);
+        feedsByDay.set(d, (feedsByDay.get(d) || 0) + 1);
+        if (!authorsByDay.has(d)) authorsByDay.set(d, new Set());
+        authorsByDay.get(d)!.add(f.author_id!);
+      }
+      for (const c of comments) {
+        const d = c.create_time!.toISOString().slice(0, 10);
+        commentsByDay.set(d, (commentsByDay.get(d) || 0) + 1);
+        if (!authorsByDay.has(d)) authorsByDay.set(d, new Set());
+        authorsByDay.get(d)!.add(c.author_id!);
+      }
+
+      const result: Array<{ date: string; feeds: number; comments: number; authors: number }> = [];
+      for (let i = 0; i < 30; i++) {
+        const d = new Date(today.getTime() - (29 - i) * 86400000).toISOString().slice(0, 10);
+        result.push({
+          date: d,
+          feeds: feedsByDay.get(d) || 0,
+          comments: commentsByDay.get(d) || 0,
+          authors: authorsByDay.get(d)?.size || 0,
+        });
+      }
+      return result;
+    };
+
+    /** Fetch feeds + comments for the week, group by hour. */
+    const buildHourlyActivity = async () => {
+      const [feeds, comments] = await Promise.all([
+        prisma.feed.findMany({ where: { create_time: { gte: weekAgo } }, select: { create_time: true } }),
+        prisma.comment.findMany({ where: { create_time: { gte: weekAgo } }, select: { create_time: true } }),
+      ]);
+
+      const feedsByHour = new Array(24).fill(0);
+      const commentsByHour = new Array(24).fill(0);
+      for (const f of feeds) feedsByHour[f.create_time!.getHours()]++;
+      for (const c of comments) commentsByHour[c.create_time!.getHours()]++;
+
+      return Array.from({ length: 24 }, (_, h) => ({
+        hour: h,
+        feeds: feedsByHour[h],
+        comments: commentsByHour[h],
+      }));
+    };
+
     const [dau, wau, mau, totalMembers, activeMembers, leftMembers, newToday, newWeek, newMonth,
       totalFeeds, feedsToday, feedsWeek, totalComments, commentsToday, commentsWeek,
-      topAuthors
+      topAuthors, dailyTrend, hourlyActivity,
     ] = await Promise.all([
       activeAuthors(today), activeAuthors(weekAgo), activeAuthors(monthAgo),
       prisma.member.count(),
@@ -48,6 +106,8 @@ export async function GET(req: NextRequest) {
         orderBy: { _count: { author_id: "desc" } },
         take: 10,
       }),
+      buildDailyTrend(),
+      buildHourlyActivity(),
     ]);
 
     const topAuthorIds = topAuthors.map((a) => a.author_id).filter(Boolean) as string[];
@@ -61,8 +121,8 @@ export async function GET(req: NextRequest) {
       overview: { dau, wau, mau, stickyRatio: mau > 0 ? Math.round((dau / mau) * 100) : 0 },
       members: { total: totalMembers, active: activeMembers, left: leftMembers, newToday, newThisWeek: newWeek, newThisMonth: newMonth },
       content: { totalFeeds, feedsToday, feedsThisWeek: feedsWeek, totalComments, commentsToday, commentsThisWeek: commentsWeek },
-      dailyTrend: [],
-      hourlyActivity: [],
+      dailyTrend,
+      hourlyActivity,
       topAuthors: topAuthors.map((a) => ({
         tinyid: a.author_id || '',
         nickname: nicknameMap.get(a.author_id || '') || (a.author_id || ''),
