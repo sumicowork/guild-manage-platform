@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, success, error } from "@/lib/api-utils";
 
+export const dynamic = "force-dynamic";
+
 // Helper to resolve member by tinyid first (most common), then BigInt id
 async function findMember(idOrTinyid: string) {
   let member = await prisma.member.findUnique({ where: { tinyid: idOrTinyid } });
