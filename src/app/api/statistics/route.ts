@@ -1,8 +1,11 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, success, error } from "@/lib/api-utils";
+import { Pool } from "pg";
 
 export const dynamic = "force-dynamic";
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,8 +17,6 @@ export async function GET(req: NextRequest) {
     const weekAgo = new Date(today.getTime() - 7 * 86400000);
     const monthAgo = new Date(today.getTime() - 30 * 86400000);
 
-    // ---- Helpers ----
-
     const activeAuthors = async (since: Date) => {
       const [feedAuthors, commentAuthors] = await Promise.all([
         prisma.feed.findMany({ where: { create_time: { gte: since } }, select: { author_id: true }, distinct: ["author_id"] }),
@@ -24,65 +25,39 @@ export async function GET(req: NextRequest) {
       return new Set([...feedAuthors.map((f) => f.author_id), ...commentAuthors.map((c) => c.author_id)]).size;
     };
 
-    /** Fetch feeds + comments for the period, group by day in JS (avoids $queryRaw 500). */
-    const buildDailyTrend = async () => {
-      const [feeds, comments] = await Promise.all([
-        prisma.feed.findMany({ where: { create_time: { gte: monthAgo } }, select: { create_time: true, author_id: true } }),
-        prisma.comment.findMany({ where: { create_time: { gte: monthAgo } }, select: { create_time: true, author_id: true } }),
-      ]);
+    const dailyTrendQuery = pool.query(
+      `SELECT d::date as day, COALESCE(f.cnt,0)::int as feeds, COALESCE(c.cnt,0)::int as comments,
+        COALESCE(a.cnt,0)::int as authors
+      FROM generate_series($1::date, $2::date, '1 day') d
+      LEFT JOIN (SELECT create_time::date as day, COUNT(*) as cnt FROM feeds WHERE create_time >= $1 GROUP BY 1) f ON f.day = d
+      LEFT JOIN (SELECT create_time::date as day, COUNT(*) as cnt FROM comments WHERE create_time >= $1 GROUP BY 1) c ON c.day = d
+      LEFT JOIN (
+        SELECT day, COUNT(DISTINCT author_id) as cnt FROM (
+          SELECT create_time::date as day, author_id FROM feeds WHERE create_time >= $3
+          UNION ALL
+          SELECT create_time::date as day, author_id FROM comments WHERE create_time >= $3
+        ) u GROUP BY 1
+      ) a ON a.day = d
+      ORDER BY d`,
+      [monthAgo, today, monthAgo]
+    );
 
-      const feedsByDay = new Map<string, number>();
-      const commentsByDay = new Map<string, number>();
-      const authorsByDay = new Map<string, Set<string>>();
-
-      for (const f of feeds) {
-        const d = f.create_time!.toISOString().slice(0, 10);
-        feedsByDay.set(d, (feedsByDay.get(d) || 0) + 1);
-        if (!authorsByDay.has(d)) authorsByDay.set(d, new Set());
-        authorsByDay.get(d)!.add(f.author_id!);
-      }
-      for (const c of comments) {
-        const d = c.create_time!.toISOString().slice(0, 10);
-        commentsByDay.set(d, (commentsByDay.get(d) || 0) + 1);
-        if (!authorsByDay.has(d)) authorsByDay.set(d, new Set());
-        authorsByDay.get(d)!.add(c.author_id!);
-      }
-
-      const result: Array<{ date: string; feeds: number; comments: number; authors: number }> = [];
-      for (let i = 0; i < 30; i++) {
-        const d = new Date(today.getTime() - (29 - i) * 86400000).toISOString().slice(0, 10);
-        result.push({
-          date: d,
-          feeds: feedsByDay.get(d) || 0,
-          comments: commentsByDay.get(d) || 0,
-          authors: authorsByDay.get(d)?.size || 0,
-        });
-      }
-      return result;
-    };
-
-    /** Fetch feeds + comments for the week, group by hour. */
-    const buildHourlyActivity = async () => {
-      const [feeds, comments] = await Promise.all([
-        prisma.feed.findMany({ where: { create_time: { gte: weekAgo } }, select: { create_time: true } }),
-        prisma.comment.findMany({ where: { create_time: { gte: weekAgo } }, select: { create_time: true } }),
-      ]);
-
-      const feedsByHour = new Array(24).fill(0);
-      const commentsByHour = new Array(24).fill(0);
-      for (const f of feeds) feedsByHour[f.create_time!.getHours()]++;
-      for (const c of comments) commentsByHour[c.create_time!.getHours()]++;
-
-      return Array.from({ length: 24 }, (_, h) => ({
-        hour: h,
-        feeds: feedsByHour[h],
-        comments: commentsByHour[h],
-      }));
-    };
+    const hourlyActivityQuery = pool.query(
+      `SELECT EXTRACT(HOUR FROM create_time)::int as hour,
+        COUNT(*) FILTER (WHERE source = 'feed')::int as feeds,
+        COUNT(*) FILTER (WHERE source = 'comment')::int as comments
+      FROM (
+        SELECT create_time, 'feed' as source FROM feeds WHERE create_time >= $1
+        UNION ALL
+        SELECT create_time, 'comment' as source FROM comments WHERE create_time >= $1
+      ) u
+      GROUP BY 1 ORDER BY 1`,
+      [weekAgo]
+    );
 
     const [dau, wau, mau, totalMembers, activeMembers, leftMembers, newToday, newWeek, newMonth,
       totalFeeds, feedsToday, feedsWeek, totalComments, commentsToday, commentsWeek,
-      topAuthors, dailyTrend, hourlyActivity,
+      topAuthors, dailyTrendResult, hourlyActivityResult,
     ] = await Promise.all([
       activeAuthors(today), activeAuthors(weekAgo), activeAuthors(monthAgo),
       prisma.member.count(),
@@ -97,8 +72,6 @@ export async function GET(req: NextRequest) {
       prisma.comment.count(),
       prisma.comment.count({ where: { create_time: { gte: today } } }),
       prisma.comment.count({ where: { create_time: { gte: weekAgo } } }),
-
-      // Top authors by post count (last 30 days)
       prisma.feed.groupBy({
         by: ["author_id"],
         where: { create_time: { gte: monthAgo } },
@@ -106,8 +79,8 @@ export async function GET(req: NextRequest) {
         orderBy: { _count: { author_id: "desc" } },
         take: 10,
       }),
-      buildDailyTrend(),
-      buildHourlyActivity(),
+      dailyTrendQuery,
+      hourlyActivityQuery,
     ]);
 
     const topAuthorIds = topAuthors.map((a) => a.author_id).filter(Boolean) as string[];
@@ -117,7 +90,17 @@ export async function GET(req: NextRequest) {
     });
     const nicknameMap = new Map(authorProfiles.map((m) => [m.tinyid, m.nickname]));
 
-    console.log("[stats-debug] dailyTrend length:", dailyTrend.length, "hourlyActivity length:", hourlyActivity.length, "dailyTrend[0]:", dailyTrend[0]);
+    const dailyTrend = dailyTrendResult.rows.map((r) => ({
+      date: typeof r.day === "string" ? r.day.slice(0, 10) : r.day,
+      feeds: Number(r.feeds),
+      comments: Number(r.comments),
+      authors: Number(r.authors),
+    }));
+
+    const hourlyActivity = Array.from({ length: 24 }, (_, h) => {
+      const row = hourlyActivityResult.rows.find((r) => Number(r.hour) === h);
+      return { hour: h, feeds: row ? Number(row.feeds) : 0, comments: row ? Number(row.comments) : 0 };
+    });
 
     return success({
       overview: { dau, wau, mau, stickyRatio: mau > 0 ? Math.round((dau / mau) * 100) : 0 },

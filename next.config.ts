@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true, // TS check is too memory-heavy for 2GB server
   },
-  // pg must be external due to native bindings, but bundling works for build
+  serverExternalPackages: ["pg", "node-cron"],
   experimental: {
     serverActions: {
       bodySizeLimit: "10mb",
