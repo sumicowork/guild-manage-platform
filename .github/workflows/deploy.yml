@@ -42,4 +42,10 @@ jobs:
             rm -rf .next
             tar -xzf next.tar.gz
             rm next.tar.gz
-            pm2 restart guild-platform
+            # Kill any orphaned next-server NOT managed by PM2 (zombie prevention)
+            pkill -f "^next-server " 2>/dev/null || true
+            sleep 2
+            # Delete + recreate to ensure clean slate (avoids stale PM2 state)
+            pm2 delete guild-platform 2>/dev/null || true
+            pm2 start ./node_modules/.bin/next --name guild-platform -- start -p 3003
+            pm2 save
