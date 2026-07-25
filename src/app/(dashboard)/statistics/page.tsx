@@ -159,8 +159,8 @@ export default function StatisticsPage() {
           <CardTitle className="text-sm">近30天 DAU 趋势（每柱 = 当日活跃人数）</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <div className="flex items-end gap-px h-32 min-w-[600px]">
+          <div className="w-full">
+            <div className="flex items-end gap-1 h-48 w-full">
               {stats.dailyTrend.map((d, i) => {
                 const h = trendMax > 0 ? Math.round((d.authors / trendMax) * 100) : 0;
                 return (
@@ -185,7 +185,6 @@ export default function StatisticsPage() {
                 );
               })}
             </div>
-          </div>
           <div className="flex justify-between mt-2 text-[10px] text-gray-400">
             <span>{stats.dailyTrend[0]?.date?.slice(5)}</span>
             <span>{stats.dailyTrend[stats.dailyTrend.length - 1]?.date?.slice(5)}</span>
