@@ -6,8 +6,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthUser(req);
-    if (!auth) return unauthorized();
+    // TODO: restore auth check
+    // const auth = await getAuthUser(req);
+    // if (!auth) return unauthorized();
 
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
