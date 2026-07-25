@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
     );
 
     const hourlyActivityQuery = pool.query(
-      `SELECT EXTRACT(HOUR FROM create_time AT TIME ZONE 'Asia/Shanghai')::int as hour,
+      `SELECT EXTRACT(HOUR FROM (create_time + INTERVAL '8 hours'))::int as hour,
         COUNT(*) FILTER (WHERE source = 'feed')::int as feeds,
         COUNT(*) FILTER (WHERE source = 'comment')::int as comments
       FROM (
