@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
       return new Set([...feedAuthors.map((f) => f.author_id), ...commentAuthors.map((c) => c.author_id)]).size;
     };
 
+    console.log("[stats-debug] pool.DATABASE_URL exists:", !!process.env.DATABASE_URL);
     const dailyTrendQuery = pool.query(
       `SELECT d::date as day, COALESCE(f.cnt,0)::int as feeds, COALESCE(c.cnt,0)::int as comments,
         COALESCE(a.cnt,0)::int as authors
@@ -86,8 +87,8 @@ export async function GET(req: NextRequest) {
         orderBy: { _count: { author_id: "desc" } },
         take: 10,
       }),
-      dailyTrendQuery,
-      hourlyActivityQuery,
+      dailyTrendQuery.then(r => { console.log("[stats-debug] dailyTrend rows:", r.rows.length, r.rows[0]); return r; }).catch(e => { console.error("[stats-debug] dailyTrend err:", e.message); return { rows: [] }; }),
+      hourlyActivityQuery.then(r => { console.log("[stats-debug] hourlyActivity rows:", r.rows.length); return r; }).catch(e => { console.error("[stats-debug] hourlyActivity err:", e.message); return { rows: [] }; }),
     ]);
 
     const topAuthorIds = topAuthors.map((a) => a.author_id).filter(Boolean) as string[];
