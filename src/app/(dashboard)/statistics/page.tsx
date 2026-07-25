@@ -60,7 +60,7 @@ export default function StatisticsPage() {
 
   if (!stats) return <p className="text-gray-400 text-sm">暂无数据</p>;
 
-  const trendMax = Math.max(...stats.dailyTrend.map(d => d.feeds + d.comments), 1);
+  const trendMax = Math.max(...stats.dailyTrend.map(d => d.authors), 1);
 
   return (
     <div className="space-y-5">
@@ -156,14 +156,13 @@ export default function StatisticsPage() {
       {/* Daily trend */}
       <Card className="border-gray-100">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">近30天活跃趋势</CardTitle>
+          <CardTitle className="text-sm">近30天 DAU 趋势（每柱 = 当日活跃人数）</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
             <div className="flex items-end gap-px h-32 min-w-[600px]">
               {stats.dailyTrend.map((d, i) => {
-                const total = d.feeds + d.comments;
-                const h = trendMax > 0 ? Math.round((total / trendMax) * 100) : 0;
+                const h = trendMax > 0 ? Math.round((d.authors / trendMax) * 100) : 0;
                 return (
                   <div
                     key={i}
@@ -173,11 +172,13 @@ export default function StatisticsPage() {
                   >
                     <div
                       className="w-full rounded-t bg-blue-400 hover:bg-blue-500 transition-colors"
-                      style={{ height: Math.max(h, total > 0 ? 2 : 0) + '%' }}
+                      style={{ height: Math.max(h, d.authors > 0 ? 2 : 0) + '%' }}
                     />
                     {selectedDate === i && (
-                      <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap z-10">
-                        {d.date.slice(5)} · 帖{fmtNum(d.feeds)} 评{fmtNum(d.comments)}
+                      <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap z-10 leading-relaxed text-center">
+                        <div>{d.date.slice(5)}</div>
+                        <div className="text-blue-300">DAU {d.authors}</div>
+                        <div>帖{fmtNum(d.feeds)} 评{fmtNum(d.comments)}</div>
                       </div>
                     )}
                   </div>
