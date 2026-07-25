@@ -11,6 +11,10 @@ export async function GET(req: NextRequest) {
     const auth = await getAuthUser(req);
     if (!auth) return unauthorized();
 
+    // Parse ?days= to control trend depth (default 30, 0 = all)
+    const daysParam = req.nextUrl.searchParams.get("days");
+    const trendDays = daysParam === "0" || daysParam === "all" ? 0 : parseInt(daysParam || "30", 10) || 30;
+
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const weekAgo = new Date(today.getTime() - 7 * 86400000);
@@ -22,6 +26,22 @@ export async function GET(req: NextRequest) {
     const todayStr = fmt(today);
     const monthAgoStr = fmt(monthAgo);
     const weekAgoStr = fmt(weekAgo);
+
+    // Determine trend start date from ?days= parameter
+    let trendStartStr: string;
+    if (trendDays === 0) {
+      // Full history: earliest create_time in feeds or comments
+      const [firstFeed, firstComment] = await Promise.all([
+        prisma.feed.findFirst({ select: { create_time: true }, orderBy: { create_time: "asc" } }),
+        prisma.comment.findFirst({ select: { create_time: true }, orderBy: { create_time: "asc" } }),
+      ]);
+      const feedTime = firstFeed?.create_time?.getTime() ?? Infinity;
+      const commentTime = firstComment?.create_time?.getTime() ?? Infinity;
+      const earliest = new Date(Math.min(feedTime, commentTime));
+      trendStartStr = fmt(earliest);
+    } else {
+      trendStartStr = fmt(new Date(today.getTime() - (trendDays - 1) * 86400000));
+    }
 
     const activeAuthors = async (since: Date) => {
       const [feedAuthors, commentAuthors] = await Promise.all([
@@ -46,7 +66,7 @@ export async function GET(req: NextRequest) {
         ) u GROUP BY 1
       ) a ON a.day = d
       ORDER BY d`,
-      [monthAgoStr, todayStr, monthAgoStr]
+      [trendStartStr, todayStr, trendStartStr]
     );
 
     const hourlyActivityQuery = pool.query(
