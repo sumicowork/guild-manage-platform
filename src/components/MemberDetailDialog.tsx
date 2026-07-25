@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '@/lib/api-client';
 import {
   Dialog,
@@ -14,7 +14,9 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { ThumbsUp, MessageCircle, CornerDownRight, AlertTriangle } from 'lucide-react';
+import { ThumbsUp, MessageCircle, CornerDownRight, AlertTriangle, X, Plus, Tag } from 'lucide-react';
+
+const availableTags = ['活跃', '优质创作者', '需注意', '高风险', '版主推荐'];
 
 interface MemberInfo {
   tinyid: string;
@@ -23,6 +25,7 @@ interface MemberInfo {
   role?: string;
   status: string;
   joinedAt?: string;
+  tags: string[];
 }
 
 interface MemberStats {
@@ -113,33 +116,96 @@ export function MemberDetailDialog({ tinyid, open, onOpenChange, onFeedClick }: 
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<MemberHistoryData | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('feeds');
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const [tags, setTags] = useState<string[]>([]);
+
+  const refresh = useCallback(() => {
+    if (!tinyid) return;
+    setLoading(true);
+    setData(null);
+    setActiveTab('feeds');
+    api.get<MemberHistoryData>(`/members/${tinyid}/history`)
+      .then(d => { setData(d); setTags(d.member.tags || []); })
+      .catch(() => toast.error('获取成员历史失败'))
+      .finally(() => setLoading(false));
+  }, [tinyid]);
 
   useEffect(() => {
-    if (open && tinyid) {
-      setLoading(true);
-      setData(null);
-      setActiveTab('feeds');
-      api.get<MemberHistoryData>(`/members/${tinyid}/history`)
-        .then(setData)
-        .catch(() => toast.error('获取成员历史失败'))
-        .finally(() => setLoading(false));
-    }
-  }, [open, tinyid]);
+    if (open && tinyid) refresh();
+  }, [open, tinyid, refresh]);
+
+  const handleAddTag = async (tag: string) => {
+    if (!tinyid) return;
+    try {
+      await api.post(`/members/${tinyid}/tags`, { tag });
+      setTags(prev => [...prev, tag]);
+      toast.success(`已添加标签: ${tag}`);
+    } catch { toast.error('添加标签失败'); }
+    setTagMenuOpen(false);
+  };
+
+  const handleRemoveTag = async (tag: string) => {
+    if (!tinyid) return;
+    try {
+      await api.delete(`/members/${tinyid}/tags/${encodeURIComponent(tag)}`);
+      setTags(prev => prev.filter(t => t !== tag));
+      toast.success(`已移除标签: ${tag}`);
+    } catch { toast.error('移除标签失败'); }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>{data?.member.nickname || '成员详情'}</DialogTitle>
-          <DialogDescription>
-            {data?.member.tinyid && (
-              <span className="font-mono text-xs">{data.member.tinyid}</span>
-            )}
-            {data?.member.role && (
-              <span className="ml-2">
-                · {roleLabels[data.member.role] || data.member.role}
-              </span>
-            )}
+          <DialogDescription className="space-y-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {data?.member.tinyid && (
+                <span className="font-mono text-xs">{data.member.tinyid}</span>
+              )}
+              {data?.member.role && (
+                <span className="text-xs">
+                  · {roleLabels[data.member.role] || data.member.role}
+                </span>
+              )}
+            </div>
+            {/* Tags */}
+            <div className="flex flex-wrap gap-1 pt-0.5">
+              {tags.map(tag => (
+                <Badge key={tag} variant="secondary" className="text-[10px] px-1.5 py-0 gap-0.5">
+                  {tag}
+                  <button onClick={() => handleRemoveTag(tag)} className="hover:text-red-400">
+                    <X className="size-2.5" />
+                  </button>
+                </Badge>
+              ))}
+              <div className="relative inline-flex">
+                <button
+                  className="inline-flex items-center justify-center rounded-md p-0.5 hover:bg-gray-100"
+                  onClick={() => setTagMenuOpen(!tagMenuOpen)}
+                >
+                  <Plus className="size-3" />
+                </button>
+                {tagMenuOpen && (
+                  <div className="absolute left-0 top-full z-50 mt-1 min-w-[120px] rounded-lg bg-white py-1 shadow-lg ring-1 ring-black/5">
+                    <div className="px-2 py-1 text-xs font-medium text-gray-500">添加标签</div>
+                    <div className="my-1 h-px bg-gray-100" />
+                    {availableTags
+                      .filter(t => !tags.includes(t))
+                      .map(tag => (
+                        <button
+                          key={tag}
+                          className="flex w-full items-center gap-1.5 px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                          onClick={() => handleAddTag(tag)}
+                        >
+                          <Tag className="size-3" />
+                          {tag}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </DialogDescription>
         </DialogHeader>
 

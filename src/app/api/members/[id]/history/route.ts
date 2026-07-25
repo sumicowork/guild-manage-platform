@@ -13,11 +13,11 @@ export async function GET(
     const { id } = await ctx.params;
 
     // 先按 tinyid 查找（前端总是发送 tinyid），找不到再尝试 BigInt id
-    let member = await prisma.member.findUnique({ where: { tinyid: id } });
+    let member = await prisma.member.findUnique({ where: { tinyid: id }, include: { tags: true } });
     if (!member) {
       try {
         const memberId = BigInt(id);
-        member = await prisma.member.findUnique({ where: { id: memberId } });
+        member = await prisma.member.findUnique({ where: { id: memberId }, include: { tags: true } });
       } catch {
         // id 不是有效 BigInt，忽略
       }
@@ -104,6 +104,7 @@ export async function GET(
         role: rawMember.role,
         status: rawMember.status,
         joinedAt: rawMember.joinTime,
+        tags: (rawMember.tags || []).map((t: any) => t.tag),
       },
       stats: {
         feedCount,
