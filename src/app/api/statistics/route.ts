@@ -6,7 +6,7 @@ import { Pool } from "pg";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     const auth = await getAuthUser(req);
     if (!auth) return unauthorized();
