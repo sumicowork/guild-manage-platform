@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
     );
 
     const hourlyActivityQuery = pool.query(
-      `SELECT EXTRACT(HOUR FROM create_time)::int as hour,
+      `SELECT EXTRACT(HOUR FROM create_time AT TIME ZONE 'Asia/Shanghai')::int as hour,
         COUNT(*) FILTER (WHERE source = 'feed')::int as feeds,
         COUNT(*) FILTER (WHERE source = 'comment')::int as comments
       FROM (
@@ -98,7 +98,7 @@ export async function GET(req: NextRequest) {
     const nicknameMap = new Map(authorProfiles.map((m) => [m.tinyid, m.nickname]));
 
     const dailyTrend = (dailyTrendRows as any[]).map((r) => ({
-      date: typeof r.day === "string" ? r.day.slice(0, 10) : r.day,
+      date: fmt(new Date(r.day)),
       feeds: Number(r.feeds),
       comments: Number(r.comments),
       authors: Number(r.authors),
@@ -109,14 +109,12 @@ export async function GET(req: NextRequest) {
       return { hour: h, feeds: row ? Number(row.feeds) : 0, comments: row ? Number(row.comments) : 0 };
     });
 
-    // DEBUG: return raw query rows alongside
     return success({
       overview: { dau, wau, mau, stickyRatio: mau > 0 ? Math.round((dau / mau) * 100) : 0 },
       members: { total: totalMembers, active: activeMembers, left: leftMembers, newToday, newThisWeek: newWeek, newThisMonth: newMonth },
       content: { totalFeeds, feedsToday, feedsThisWeek: feedsWeek, totalComments, commentsToday, commentsThisWeek: commentsWeek },
       dailyTrend,
       hourlyActivity,
-      _debug: { dailyRowsLen: dailyTrendRows.length, hourlyRowsLen: hourlyActivityRows.length },
       topAuthors: topAuthors.map((a) => ({
         tinyid: a.author_id || '',
         nickname: nicknameMap.get(a.author_id || '') || (a.author_id || ''),
