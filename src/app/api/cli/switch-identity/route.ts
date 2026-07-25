@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { NextRequest } from "next/server";
 import { getAuthUser, unauthorized, forbidden, success, error } from "@/lib/api-utils";
 import { switchToIdentity, buildCliEnv } from "@/lib/cli/credentials";
