@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
 
     const [dau, wau, mau, totalMembers, activeMembers, leftMembers, newToday, newWeek, newMonth,
       totalFeeds, feedsToday, feedsWeek, totalComments, commentsToday, commentsWeek,
-      topAuthors, dailyTrendResult, hourlyActivityResult,
+      topAuthors, dailyTrendRows, hourlyActivityRows,
     ] = await Promise.all([
       activeAuthors(today), activeAuthors(weekAgo), activeAuthors(monthAgo),
       prisma.member.count(),
@@ -86,8 +86,8 @@ export async function GET(req: NextRequest) {
         orderBy: { _count: { author_id: "desc" } },
         take: 10,
       }),
-      dailyTrendQuery.then(r => { console.log("[stats-debug] dailyTrend rows:", r.rows.length, r.rows[0]); return r; }).catch(e => { console.error("[stats-debug] dailyTrend err:", e.message); return { rows: [] }; }),
-      hourlyActivityQuery.then(r => { console.log("[stats-debug] hourlyActivity rows:", r.rows.length); return r; }).catch(e => { console.error("[stats-debug] hourlyActivity err:", e.message); return { rows: [] }; }),
+      dailyTrendQuery.then(r => r.rows).catch(e => { console.error(e); return []; }),
+      hourlyActivityQuery.then(r => r.rows).catch(e => { console.error(e); return []; }),
     ]);
 
     const topAuthorIds = topAuthors.map((a) => a.author_id).filter(Boolean) as string[];
@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
     });
     const nicknameMap = new Map(authorProfiles.map((m) => [m.tinyid, m.nickname]));
 
-    const dailyTrend = dailyTrendResult.rows.map((r) => ({
+    const dailyTrend = (dailyTrendRows as any[]).map((r) => ({
       date: typeof r.day === "string" ? r.day.slice(0, 10) : r.day,
       feeds: Number(r.feeds),
       comments: Number(r.comments),
@@ -105,16 +105,18 @@ export async function GET(req: NextRequest) {
     }));
 
     const hourlyActivity = Array.from({ length: 24 }, (_, h) => {
-      const row = hourlyActivityResult.rows.find((r) => Number(r.hour) === h);
+      const row = (hourlyActivityRows as any[]).find((r) => Number(r.hour) === h);
       return { hour: h, feeds: row ? Number(row.feeds) : 0, comments: row ? Number(row.comments) : 0 };
     });
 
+    // DEBUG: return raw query rows alongside
     return success({
       overview: { dau, wau, mau, stickyRatio: mau > 0 ? Math.round((dau / mau) * 100) : 0 },
       members: { total: totalMembers, active: activeMembers, left: leftMembers, newToday, newThisWeek: newWeek, newThisMonth: newMonth },
       content: { totalFeeds, feedsToday, feedsThisWeek: feedsWeek, totalComments, commentsToday, commentsThisWeek: commentsWeek },
       dailyTrend,
       hourlyActivity,
+      _debug: { dailyRowsLen: dailyTrendRows.length, hourlyRowsLen: hourlyActivityRows.length },
       topAuthors: topAuthors.map((a) => ({
         tinyid: a.author_id || '',
         nickname: nicknameMap.get(a.author_id || '') || (a.author_id || ''),
