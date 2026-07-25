@@ -17,6 +17,13 @@ export async function GET(req: NextRequest) {
     const weekAgo = new Date(today.getTime() - 7 * 86400000);
     const monthAgo = new Date(today.getTime() - 30 * 86400000);
 
+    /** Format Date as YYYY-MM-DD in local timezone (avoids pg Date→UTC conversion issues). */
+    const fmt = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const todayStr = fmt(today);
+    const monthAgoStr = fmt(monthAgo);
+    const weekAgoStr = fmt(weekAgo);
+
     const activeAuthors = async (since: Date) => {
       const [feedAuthors, commentAuthors] = await Promise.all([
         prisma.feed.findMany({ where: { create_time: { gte: since } }, select: { author_id: true }, distinct: ["author_id"] }),
@@ -39,7 +46,7 @@ export async function GET(req: NextRequest) {
         ) u GROUP BY 1
       ) a ON a.day = d
       ORDER BY d`,
-      [monthAgo, today, monthAgo]
+      [monthAgoStr, todayStr, monthAgoStr]
     );
 
     const hourlyActivityQuery = pool.query(
@@ -52,7 +59,7 @@ export async function GET(req: NextRequest) {
         SELECT create_time, 'comment' as source FROM comments WHERE create_time >= $1
       ) u
       GROUP BY 1 ORDER BY 1`,
-      [weekAgo]
+      [weekAgoStr]
     );
 
     const [dau, wau, mau, totalMembers, activeMembers, leftMembers, newToday, newWeek, newMonth,
