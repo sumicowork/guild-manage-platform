@@ -91,13 +91,6 @@ interface MemberDetailDialogProps {
   onFeedClick?: (feedId: string) => void;
 }
 
-const roleLabels: Record<string, string> = {
-  owner: '频道主',
-  admin: '管理员',
-  moderator: '版主',
-  member: '成员',
-};
-
 const actionLabels: Record<string, string> = {
   move: '移帖',
   delete: '删帖',
@@ -162,11 +155,6 @@ export function MemberDetailDialog({ tinyid, open, onOpenChange, onFeedClick }: 
             <div className="flex flex-wrap items-center gap-1.5">
               {data?.member.tinyid && (
                 <span className="font-mono text-xs">{data.member.tinyid}</span>
-              )}
-              {data?.member.role && (
-                <span className="text-xs">
-                  · {roleLabels[data.member.role] || data.member.role}
-                </span>
               )}
             </div>
             {/* Tags */}

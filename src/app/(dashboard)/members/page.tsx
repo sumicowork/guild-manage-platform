@@ -47,24 +47,7 @@ interface MemberListResponse {
   pageSize: number;
 }
 
-const availableTags = ['活跃', '优质创作者', '需注意', '高风险', '版主推荐'];
-
-const statusColors: Record<string, string> = {
-  active: 'bg-green-50 text-green-600',
-  left: 'bg-blue-50 text-blue-600',
-};
-
-const statusLabels: Record<string, string> = {
-  active: '活跃',
-  left: '已离开',
-};
-
-const roleLabels: Record<string, string> = {
-  owner: '频道主',
-  admin: '管理员',
-  moderator: '版主',
-  member: '成员',
-};
+const availableTags = ['优质创作者', '需注意', '高风险', '版主推荐'];
 
 export default function MembersPage() {
   const router = useRouter();
@@ -152,16 +135,6 @@ export default function MembersPage() {
       render: (m) => <span className="font-mono text-xs text-gray-500">{m.tinyid}</span>,
     },
     {
-      key: 'role',
-      header: '角色',
-      width: '80px',
-      render: (m) => (
-        <Badge variant="outline" className="text-xs">
-          {roleLabels[m.role] || m.role}
-        </Badge>
-      ),
-    },
-    {
       key: 'joinedAt',
       header: '加入时间',
       width: '120px',
@@ -169,23 +142,6 @@ export default function MembersPage() {
         <span className="text-xs text-gray-500">
           {new Date(m.joinedAt).toLocaleDateString('zh-CN')}
         </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: '状态',
-      width: '100px',
-      render: (m) => (
-        <div className="flex flex-col items-center">
-          <Badge className={statusColors[m.status] || 'bg-gray-200 text-gray-700'}>
-            {statusLabels[m.status] || m.status}
-          </Badge>
-          {m.status === 'left' && m.leftAt && (
-            <span className="text-[10px] text-gray-400 mt-0.5">
-              {new Date(m.leftAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-            </span>
-          )}
-        </div>
       ),
     },
     {
@@ -205,9 +161,16 @@ export default function MembersPage() {
     {
       key: 'tags',
       header: '标签',
-      width: '160px',
+      width: '180px',
       render: (m) => (
         <div className="flex flex-wrap items-center gap-1">
+          {/* System status tag */}
+          {m.status === 'left' && (
+            <Badge variant="destructive" className="text-[10px] px-1.5 py-0" title={m.leftAt ? `离开: ${new Date(m.leftAt).toLocaleString('zh-CN')}` : ''}>
+              已离开
+            </Badge>
+          )}
+          {/* Manual tags */}
           {m.tags.map((tag) => (
             <Badge key={tag} variant="secondary" className="text-xs gap-1">
               {tag}
