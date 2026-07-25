@@ -62,8 +62,6 @@ export default function StatisticsPage() {
 
   const trendMax = Math.max(...stats.dailyTrend.map(d => d.feeds + d.comments), 1);
 
-  console.log("[stats-chart] dailyTrend.length:", stats.dailyTrend.length, "trendMax:", trendMax, "sample:", stats.dailyTrend[0]);
-
   return (
     <div className="space-y-5">
       <h2 className="text-lg font-semibold text-gray-900">数据统计</h2>
@@ -169,7 +167,7 @@ export default function StatisticsPage() {
                 return (
                   <div
                     key={i}
-                    className="flex-1 flex flex-col items-center justify-end group relative"
+                    className="flex-1 h-full flex flex-col items-center justify-end group relative"
                     onMouseEnter={() => setSelectedDate(i)}
                     onMouseLeave={() => setSelectedDate(null)}
                   >
@@ -191,7 +189,6 @@ export default function StatisticsPage() {
             <span>{stats.dailyTrend[0]?.date?.slice(5)}</span>
             <span>{stats.dailyTrend[stats.dailyTrend.length - 1]?.date?.slice(5)}</span>
           </div>
-          <div className="mt-1 text-[10px] text-red-500">DEBUG: count={stats.dailyTrend.length}, trendMax={trendMax}, sample={JSON.stringify(stats.dailyTrend[0])}</div>
         </CardContent>
       </Card>
 
