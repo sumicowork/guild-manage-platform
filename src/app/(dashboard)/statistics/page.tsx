@@ -175,7 +175,7 @@ export default function StatisticsPage() {
                       style={{ height: Math.max(h, d.authors > 0 ? 2 : 0) + '%' }}
                     />
                     {selectedDate === i && (
-                      <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap z-10 leading-relaxed text-center">
+                      <div className="absolute top-full mt-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-[10px] px-1.5 py-1 rounded whitespace-nowrap z-10 leading-relaxed text-center shadow-lg">
                         <div>{d.date.slice(5)}</div>
                         <div className="text-blue-300">DAU {d.authors}</div>
                         <div>帖{fmtNum(d.feeds)} 评{fmtNum(d.comments)}</div>
