@@ -6,9 +6,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    // TODO: restore auth check
-    // const auth = await getAuthUser(req);
-    // if (!auth) return unauthorized();
+    const auth = await getAuthUser(req);
+    if (!auth) return unauthorized();
 
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -56,30 +55,30 @@ export async function GET(req: NextRequest) {
       prisma.comment.count({ where: { create_time: { gte: weekAgo } } }),
 
       // Daily trend: last 30 days
-      prisma.$queryRawUnsafe<Array<{ day: string; feeds: number; comments: number; authors: number }>>(`
+      prisma.$queryRaw<Array<{ day: string; feeds: number; comments: number; authors: number }>>`
         SELECT
           d::date as day,
-          COALESCE(f.cnt, 0) as feeds,
-          COALESCE(c.cnt, 0) as comments,
-          COALESCE(a.cnt, 0) as authors
-        FROM generate_series($1::date, $2::date, '1 day') d
+          COALESCE(f.cnt, 0)::int as feeds,
+          COALESCE(c.cnt, 0)::int as comments,
+          COALESCE(a.cnt, 0)::int as authors
+        FROM generate_series(${monthAgo}::date, ${today}::date, '1 day') d(d)
         LEFT JOIN (
           SELECT create_time::date as day, COUNT(*) as cnt
-          FROM feeds WHERE create_time >= $1 GROUP BY 1
-        ) f ON f.day = d
+          FROM feeds WHERE create_time >= ${monthAgo} GROUP BY 1
+        ) f ON f.day = d.d
         LEFT JOIN (
           SELECT create_time::date as day, COUNT(*) as cnt
-          FROM comments WHERE create_time >= $1 GROUP BY 1
-        ) c ON c.day = d
+          FROM comments WHERE create_time >= ${monthAgo} GROUP BY 1
+        ) c ON c.day = d.d
         LEFT JOIN (
           SELECT day, COUNT(DISTINCT author_id) as cnt FROM (
-            SELECT create_time::date as day, author_id FROM feeds WHERE create_time >= $1
+            SELECT create_time::date as day, author_id FROM feeds WHERE create_time >= ${monthAgo}
             UNION ALL
-            SELECT create_time::date as day, author_id FROM comments WHERE create_time >= $1
+            SELECT create_time::date as day, author_id FROM comments WHERE create_time >= ${monthAgo}
           ) u GROUP BY 1
-        ) a ON a.day = d
-        ORDER BY d
-      `, monthAgo, today),
+        ) a ON a.day = d.d
+        ORDER BY d.d
+      `,
 
       // Top authors by post count (last 30 days)
       prisma.feed.groupBy({
@@ -91,22 +90,22 @@ export async function GET(req: NextRequest) {
       }),
 
       // Hourly activity distribution (last 7 days)
-      prisma.$queryRawUnsafe<Array<{ hour: number; feeds: number; comments: number }>>(`
+      prisma.$queryRaw<Array<{ hour: number; feeds: number; comments: number }>>`
         SELECT
           EXTRACT(HOUR FROM create_time)::int as hour,
-          COALESCE(f.cnt, 0) as feeds,
-          COALESCE(c.cnt, 0) as comments
+          COALESCE(f.cnt, 0)::int as feeds,
+          COALESCE(c.cnt, 0)::int as comments
         FROM generate_series(0, 23) h(hour)
         LEFT JOIN (
           SELECT EXTRACT(HOUR FROM create_time)::int as hour, COUNT(*) as cnt
-          FROM feeds WHERE create_time >= $1 GROUP BY 1
+          FROM feeds WHERE create_time >= ${weekAgo} GROUP BY 1
         ) f ON f.hour = h.hour
         LEFT JOIN (
           SELECT EXTRACT(HOUR FROM create_time)::int as hour, COUNT(*) as cnt
-          FROM comments WHERE create_time >= $1 GROUP BY 1
+          FROM comments WHERE create_time >= ${weekAgo} GROUP BY 1
         ) c ON c.hour = h.hour
         ORDER BY h.hour
-      `, weekAgo),
+      `,
     ]);
 
     // Enrich top authors with nicknames
@@ -140,13 +139,13 @@ export async function GET(req: NextRequest) {
         commentsToday,
         commentsThisWeek: commentsWeek,
       },
-      dailyTrend: dailyTrend.map((d) => ({
+      dailyTrend: dailyTrend.map((d: any) => ({
         date: d.day,
         feeds: Number(d.feeds),
         comments: Number(d.comments),
         authors: Number(d.authors),
       })),
-      hourlyActivity: hourlyTrend.map((h) => ({
+      hourlyActivity: hourlyTrend.map((h: any) => ({
         hour: Number(h.hour),
         feeds: Number(h.feeds),
         comments: Number(h.comments),
