@@ -316,9 +316,9 @@ export default function AutoRulePanel() {
                 {channels.length > 0 ? (
                   <Select value={formChannelId} onValueChange={(v) => setFormChannelId(v ?? '')}>
                     <SelectTrigger>
-                      <span className="text-sm">{channelNameMap.get(formChannelId) || '选择目标版块...'}</span>
+                      <span className="text-sm truncate">{channelNameMap.get(formChannelId) || '选择目标版块...'}</span>
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="max-h-80">
                       {channels.filter(c => c.channel_id).map((ch) => (
                         <SelectItem key={ch.id} value={ch.channel_id!}>
                           <span className="flex items-center gap-2">
