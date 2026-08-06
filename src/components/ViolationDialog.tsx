@@ -313,9 +313,9 @@ export function ViolationDialog({
                 <Label>目标版块</Label>
                 <Select value={targetChannel} onValueChange={(v) => setTargetChannel(v ?? '')}>
                   <SelectTrigger className="w-full">
-                    <span className="text-sm">{targetChannel ? (channels.find(c => c.channel_id === targetChannel)?.name || '选择目标版块') : '选择目标版块'}</span>
+                    <span className="text-sm truncate">{targetChannel ? (channels.find(c => c.channel_id === targetChannel)?.name || '选择目标版块') : '选择目标版块'}</span>
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-80">
                     {channels.filter(c => c.channel_id).map((ch) => (
                       <SelectItem key={ch.id} value={ch.channel_id!}>
                         {ch.name}
