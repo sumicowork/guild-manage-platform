@@ -40,7 +40,17 @@ export async function GET(req: NextRequest) {
 
     for (const f of feedsWithoutId) {
       if (f.channel_name && !seenNames.has(f.channel_name)) {
-        channels.push({ id: f.channel_name, name: f.channel_name, channel_id: null });
+        // Try to find a matching channel_id from other feeds with same name
+        const withId = await prisma.feed.findFirst({
+          where: { channel_name: f.channel_name, channel_id: { not: null } },
+          select: { channel_id: true },
+        });
+        channels.push({
+          id: f.channel_name,
+          name: f.channel_name,
+          channel_id: withId?.channel_id ?? null,
+        });
+        seenNames.add(f.channel_name);
       }
     }
 
