@@ -1,58 +1,38 @@
 export const dynamic = "force-dynamic";
 import { NextRequest } from "next/server";
-import { prisma } from "@/lib/db";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { getAuthUser, unauthorized, success, error } from "@/lib/api-utils";
+
+const execFileP = promisify(execFile);
+const GUILD_ID = "82203161765285899";
+
+interface CliChannel {
+  channel_id: string;
+  channel_name: string;
+  guild_id: string;
+}
 
 export async function GET(req: NextRequest) {
   try {
     const auth = await getAuthUser(req);
     if (!auth) return unauthorized();
 
-    // Get channels: prefer numeric channel_id, fallback to name-based
-    // For channels with a real name, use name as id so filter catches all same-name feeds
-    const feedsWithId = await prisma.feed.findMany({
-      where: { channel_id: { not: null } },
-      select: { channel_id: true, channel_name: true },
-      distinct: ["channel_id"],
-      orderBy: { channel_name: "asc" },
-    });
+    // Use CLI for authoritative channel list (DB data is stale from moved feeds)
+    const { stdout } = await execFileP("tencent-channel-cli", [
+      "manage", "get-guild-channel-list",
+      "--guild-id", GUILD_ID,
+      "--json", "--yes",
+    ], { timeout: 15000, maxBuffer: 1024 * 1024 });
 
-    const feedsWithoutId = await prisma.feed.findMany({
-      where: { channel_id: null, channel_name: { not: null } },
-      select: { channel_name: true },
-      distinct: ["channel_name"],
-      orderBy: { channel_name: "asc" },
-    });
+    const result = JSON.parse(stdout);
+    const cliChannels: CliChannel[] = result?.data?.channels ?? [];
 
-    const channels: { id: string; name: string; channel_id: string | null }[] = [];
-    const seenNames = new Set<string>();
-
-    for (const f of feedsWithId) {
-      if (f.channel_id) {
-        const name = f.channel_name ?? f.channel_id;
-        if (!seenNames.has(name)) {
-          // Use channel_name as id for feed filtering (OR-clause matches both)
-          channels.push({ id: f.channel_name ?? f.channel_id, name, channel_id: f.channel_id });
-          seenNames.add(name);
-        }
-      }
-    }
-
-    for (const f of feedsWithoutId) {
-      if (f.channel_name && !seenNames.has(f.channel_name)) {
-        // Try to find a matching channel_id from other feeds with same name
-        const withId = await prisma.feed.findFirst({
-          where: { channel_name: f.channel_name, channel_id: { not: null } },
-          select: { channel_id: true },
-        });
-        channels.push({
-          id: f.channel_name,
-          name: f.channel_name,
-          channel_id: withId?.channel_id ?? null,
-        });
-        seenNames.add(f.channel_name);
-      }
-    }
+    const channels = cliChannels.map((ch) => ({
+      id: ch.channel_name,
+      name: ch.channel_name,
+      channel_id: ch.channel_id,
+    }));
 
     return success(channels);
   } catch (err) {
