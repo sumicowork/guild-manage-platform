@@ -42,11 +42,13 @@ jobs:
             rm -rf .next
             tar -xzf next.tar.gz
             rm next.tar.gz
-            # Stop PM2 app FIRST (kills parent), then kill orphaned next-server workers
+            # Stop PM2 app FIRST (kills parent), then kill orphaned next-server workers.
             # Next.js spawns a separate next-server worker that outlives the PM2 parent —
-            # killing by exact cmdline pattern prevents EADDRINUSE on restart
+            # killing by exact cmdline pattern prevents EADDRINUSE on restart.
+            # NOTE: "[r]" regex trick prevents pkill from matching this script's own shell
+            # (the script text contains "next-server" which pkill -f would otherwise match).
             pm2 delete guild-platform 2>/dev/null || true
-            pkill -9 -f "next-server" 2>/dev/null || true
+            pkill -9 -f "next-serve[r]" 2>/dev/null || true
             sleep 2
             # Standalone single-process server (no worker fork → no orphans)
             # Copy public + static assets that standalone does not bundle
