@@ -38,9 +38,14 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            DIAG=/tmp/deploy_diag.log
+            exec > $DIAG 2>&1
+            set -x
             cd /opt/guild-manage-platform
+            ls -la next.tar.gz
             rm -rf .next
             tar -xzf next.tar.gz
+            ls .next/standalone/server.js || echo "STANDALONE MISSING"
             rm next.tar.gz
             # Stop PM2 app FIRST (kills parent), then kill orphaned next-server workers.
             # Next.js spawns a separate next-server worker that outlives the PM2 parent —
@@ -50,6 +55,7 @@ jobs:
             pm2 delete guild-platform 2>/dev/null || true
             pkill -9 -f "next-serve[r]" 2>/dev/null || true
             sleep 2
+            ss -tlnp | grep 3003 || echo "PORT FREE"
             # Standalone single-process server (no worker fork → no orphans)
             # Copy public + static assets that standalone does not bundle
             cp -r public .next/standalone/public 2>/dev/null || true
@@ -58,4 +64,6 @@ jobs:
             # standalone does not auto-load .env — export it for the PM2 child
             set -a; . ./.env 2>/dev/null || true; set +a
             pm2 start ecosystem.config.js
+            sleep 5
+            pm2 list | grep guild-platform || echo "PM2 LIST EMPTY"
             pm2 save
