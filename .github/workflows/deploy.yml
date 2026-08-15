@@ -57,5 +57,5 @@ jobs:
             cp -r .next/static .next/standalone/.next/static 2>/dev/null || true
             # standalone does not auto-load .env — export it for the PM2 child
             set -a; . ./.env 2>/dev/null || true; set +a
-            pm2 start ./.next/standalone/server.js --name guild-platform
+            pm2 start ecosystem.config.js
             pm2 save
