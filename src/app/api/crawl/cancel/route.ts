@@ -65,14 +65,23 @@ export async function POST(req: NextRequest) {
   if (!aborted) {
     // 任务记录是 running/pending，但没有对应的 controller
     // 可能是服务器重启后的僵尸任务 — 直接在 DB 标记为 cancelled
-    await prisma.crawlTask.update({
-      where: { id: taskId },
+    // 条件更新：仅当任务仍是 running/pending 时标记，避免覆盖已完成的任务
+    const res = await prisma.crawlTask.updateMany({
+      where: { id: taskId, status: { in: ["running", "pending"] } },
       data: {
         status: "cancelled",
         finished_at: new Date(),
         error_log: "Marked as cancelled (no running controller — likely zombie task)",
       },
     });
+    if (res.count !== 1) {
+      return success({
+        cancelled: false,
+        taskId: String(taskId),
+        reason: "state changed",
+        message: "任务状态已变化，取消未生效",
+      });
+    }
     return success({
       cancelled: true,
       taskId: String(taskId),
