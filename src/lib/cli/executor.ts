@@ -83,13 +83,15 @@ async function getIdentityPool(): Promise<PoolIdentity[]> {
   return _identityPoolCache;
 }
 
-/** 使身份池缓存失效（如新增/删除/重新验证身份后调用） */
-export function invalidateIdentityPool(): void {
+/** 使身份池缓存失效。resetAuthFailed=true 时同时重置失效标记（健康检查用）；false 时保留 authFailed（8011 分支用，防止失效标记被自毁） */
+export function invalidateIdentityPool(resetAuthFailed: boolean = true): void {
   _identityPoolCache = [];
   _poolCacheTime = 0;
-  // Clear all in-memory authFailed flags — identity health may have changed
-  for (const state of _identityStates.values()) {
-    state.authFailed = false;
+  if (resetAuthFailed) {
+    // Clear all in-memory authFailed flags — identity health may have changed
+    for (const state of _identityStates.values()) {
+      state.authFailed = false;
+    }
   }
 }
 
@@ -225,6 +227,7 @@ export enum CliErrorCode {
   AUTH_RETRY = 151,
   AUTH_FAILURE = 8011,
   DATA_DELETED = 10014,
+  TIMEOUT = -2, // 专用超时码：不按普通错误重试（避免 5×600s 阻塞）
 }
 
 export class CliError extends Error {
@@ -293,10 +296,10 @@ async function executeOnce(cliPath: string, args: string[], customEnv?: NodeJS.P
       };
     }
 
-    // Timed out
+    // Timed out — dedicated code so callers can distinguish from generic errors
     if (err.killed || err.signal === "SIGTERM") {
       return {
-        code: -1,
+        code: CliErrorCode.TIMEOUT,
         message: `CLI timed out after ${CLI_TIMEOUT_MS}ms`,
         stderr: stderrStr,
         stdout: stdoutStr,
@@ -420,6 +423,15 @@ export async function executeCli(
       return result.data;
     }
 
+    // ── 超时：不重试（每次重试会重新等待完整 CLI_TIMEOUT_MS，最坏 5×600s）──
+    if (result.code === CliErrorCode.TIMEOUT) {
+      throw new CliError(
+        `CLI ${domain} ${action} timed out after ${CLI_TIMEOUT_MS}ms`,
+        CliErrorCode.TIMEOUT,
+        result.stderr || ""
+      );
+    }
+
     // ── 153 限流：优先切换身份，否则指数退避 ──
     if (result.code === CliErrorCode.RATE_LIMIT) {
       _rateLimitCounts.set(delayKey, (_rateLimitCounts.get(delayKey) || 0) + 1);
@@ -431,8 +443,8 @@ export async function executeCli(
         markIdentityCooldown(currentIdentityId, rateLimitStreak);
       }
 
-      // Layer 1: 尝试切换到其他身份（仅在未手动指定身份 或 允许自动切换时）
-      if (identitySwitchCount < MAX_IDENTITY_SWITCHES) {
+      // Layer 1: 尝试切换到其他身份（仅在未手动指定身份时；写操作指定身份不允许静默切换，避免用错身份执行）
+      if (!userSpecifiedIdentity && identitySwitchCount < MAX_IDENTITY_SWITCHES) {
         const pool = await getIdentityPool();
         const alternate = pool.find(
           (p) => p.id !== currentIdentityId && !isIdentityInCooldown(p.id)
@@ -494,7 +506,8 @@ export async function executeCli(
     if (result.code === CliErrorCode.AUTH_FAILURE) {
       if (currentIdentityId) {
         markIdentityAuthFailed(currentIdentityId);
-      invalidateIdentityPool();
+        // 只清缓存、保留 authFailed 标记（否则失效身份立即复活，反复打 8011）
+        invalidateIdentityPool(false);
       }
 
       // 如果未手动指定身份，尝试切换到其他身份

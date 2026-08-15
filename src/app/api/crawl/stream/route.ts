@@ -1,9 +1,15 @@
+import { NextRequest } from "next/server";
 import { crawlEvents } from "@/lib/events";
+import { getAuthUser, unauthorized } from "@/lib/api-utils";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // 鉴权：防止任何人订阅任务事件流（含频道规模等内部信息）
+  const auth = await getAuthUser(req);
+  if (!auth) return unauthorized();
+
   let cleanup: (() => void) | null = null;
 
   const stream = new ReadableStream({
@@ -33,6 +39,9 @@ export async function GET() {
         crawlEvents.off("update", onUpdate);
         crawlEvents.off("status", onStatus);
       };
+
+      // 客户端断开时清理监听器
+      req.signal?.addEventListener?.("abort", () => cleanup?.());
     },
   });
 

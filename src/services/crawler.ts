@@ -48,14 +48,19 @@ function parseDateTime(
   raw: string | number | undefined | null
 ): Date | null {
   if (!raw) return null;
-  if (typeof raw === "number") return new Date(raw * 1000);
-  // Handle numeric strings like "1780050984" (Unix timestamps as strings)
-  if (typeof raw === "string" && /^\d+$/.test(raw)) {
-    return new Date(parseInt(raw, 10) * 1000);
+  // 13 位毫秒时间戳：直接 new Date(ms)
+  if (typeof raw === "number") {
+    return raw > 1e12 ? new Date(raw) : new Date(raw * 1000);
   }
-  // Handle "YYYY-MM-DD HH:mm:ss" format
-  const d = new Date(raw.replace(" ", "T") + "+08:00");
-  return isNaN(d.getTime()) ? null : d;
+  // 数字字符串：13 位毫秒 vs 10 位秒
+  if (typeof raw === "string" && /^\d+$/.test(raw)) {
+    const n = parseInt(raw, 10);
+    return new Date(n > 1e12 ? n : n * 1000);
+  }
+  // 优先原生解析（兼容 ISO 带 Z/偏移）；仅对无时区标记的 "YYYY-MM-DD HH:mm:ss" 补 +08:00
+  const hasTz = /[zZ]$/.test(raw) || /[+-]\d{2}:?\d{2}$/.test(raw);
+  const candidate = hasTz ? new Date(raw) : new Date(raw.replace(" ", "T") + "+08:00");
+  return isNaN(candidate.getTime()) ? null : candidate;
 }
 
 /** Safe BigInt conversion */
@@ -73,15 +78,20 @@ function log(taskId: bigint, msg: string): void {
   console.log(`[Crawler][Task ${taskId}] ${msg}`);
 }
 
-/** Update the crawl_task stats column in DB */
+/** Update the crawl_task stats column in DB — 容错：进度写入失败不杀死爬虫 */
 async function updateTaskStats(
   taskId: bigint,
   stats: Record<string, unknown>
 ): Promise<void> {
-  await prisma.crawlTask.update({
-    where: { id: taskId },
-    data: { stats: stats as any },
-  });
+  try {
+    await prisma.crawlTask.update({
+      where: { id: taskId },
+      data: { stats: stats as any },
+    });
+  } catch (err) {
+    console.error(`[Crawler] Failed to persist stats for task ${taskId}:`, err instanceof Error ? err.message : err);
+    return; // 进度写入失败不致命，最终状态由 updateTaskStatus 兜底
+  }
   // Throttle SSE emissions — rapid calls (e.g. per-member in member crawl)
   // would flood the browser with events → ERR_INSUFFICIENT_RESOURCES
   const key = String(taskId);
@@ -99,6 +109,23 @@ async function updateTaskStatus(
   status: string,
   errorLog?: string
 ): Promise<void> {
+  // 终态守卫：completed/cancelled/failed/interrupted 后不再被覆盖
+  // （防止 cancel 兜底被完成态覆盖、failed→cancelled 双重写入等状态漂移）
+  const TERMINAL = ["completed", "cancelled", "failed", "interrupted"];
+  if (TERMINAL.includes(status)) {
+    const res = await prisma.crawlTask.updateMany({
+      where: { id: taskId, status: { notIn: TERMINAL } },
+      data: {
+        status,
+        finished_at: new Date(),
+        error_log: errorLog,
+      },
+    });
+    if (res.count === 1) {
+      crawlEvents.emit("status", { taskId: String(taskId), status, errorLog });
+    }
+    return;
+  }
   await prisma.crawlTask.update({
     where: { id: taskId },
     data: {
@@ -140,6 +167,21 @@ function sanitizeObject(obj: any): void {
       sanitizeObject(v);
     }
   }
+}
+
+/** 结构化比较 images：忽略数组顺序与对象键序（jsonb 规范化后的差异不应判定为变化） */
+function imagesEqual(a: any, b: any): boolean {
+  const normalize = (arr: any): string => {
+    if (!Array.isArray(arr)) return JSON.stringify(arr ?? null);
+    const items = arr.map((it) => {
+      if (it && typeof it === "object") {
+        return JSON.stringify(Object.keys(it).sort().reduce((acc: Record<string, any>, k) => { acc[k] = it[k]; return acc; }, {}));
+      }
+      return String(it);
+    }).sort();
+    return JSON.stringify(items);
+  };
+  return normalize(a) === normalize(b);
 }
 
 // ─── Upsert helpers (batch-safe) ──────────────────────────────────────
@@ -502,8 +544,10 @@ export async function runFullCrawl(
         try {
           await upsertFeed(feed, undefined, channelNameToId);
           allFeedIds.push(feed.feed_id);
-          if (feed.channel_id) {
-            feedChannelMap[feed.feed_id] = String(feed.channel_id);
+          // 列表接口不返回 channel_id，用 channel_name 回退（深层回复分页依赖）
+          const resolvedChId = feed.channel_id ?? channelNameToId.get(feed.channel_name);
+          if (resolvedChId) {
+            feedChannelMap[feed.feed_id] = String(resolvedChId);
           }
           recordPhaseCall("feeds", stats.feedsTotal + 1);
           stats.feedsTotal++;
@@ -546,9 +590,16 @@ export async function runFullCrawl(
           if (!commentPage.comments || commentPage.comments.length === 0) break;
 
           for (const comment of commentPage.comments) {
-            await upsertComment(comment, feedId);
-            recordPhaseCall("comments", i + 1);
-            stats.commentsTotal++;
+            try {
+              await upsertComment(comment, feedId);
+              recordPhaseCall("comments", i + 1);
+              stats.commentsTotal++;
+            } catch (err) {
+              // 单条评论失败不中断整条 feed（对齐 update crawl 的隔离策略）
+              stats.errors++;
+              console.error(`[Crawler] Failed to upsert comment ${comment.comment_id}:`, err);
+              continue;
+            }
 
             // Process replies nested in comments (initial batch from API)
             if (comment.replies_preview && Array.isArray(comment.replies_preview)) {
@@ -621,7 +672,7 @@ export async function runFullCrawl(
             await prisma.feed.update({
               where: { feed_id: feedId },
               data: {
-                content: detail.content,
+                content: detail.content || undefined,
                 share_url: detail.share_url || undefined,
                 feed_type: detail.feed_type || undefined,
               },
@@ -725,6 +776,8 @@ export async function runFullCrawl(
     await updateTaskStatus(taskId, "completed");
     log(taskId, `Full crawl completed. Stats: ${JSON.stringify(stats)}`);
   } catch (err) {
+    // 取消：不写 failed，直接上抛由 scheduler 标 cancelled（避免 failed→cancelled 双重写入）
+    if (err instanceof CrawlCancelledError) throw err;
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`[Crawler] Full crawl failed:`, err);
     await updateTaskStats(taskId, { ...stats, phase: "failed" });
@@ -760,6 +813,7 @@ export async function runUpdateCrawl(
     newFeeds: 0,
     updatedFeeds: 0,
     commentsAdded: 0,
+    commentsProcessed: 0,
     errors: 0,
     autoActions: 0,
     timing: {} as Record<string, any>,
@@ -835,6 +889,8 @@ export async function runUpdateCrawl(
     const newFeedIds: string[] = [];
     const allSeenFeedIds = new Set<string>();
     const feedChannelMap: Record<string, string> = {};
+    // feed_id → API 本轮实际返回的 comment_id 集合（detectDeletions 事实对比用）
+    const refetchedComments = new Map<string, Set<string>>();
     let oldestSeenTime: number | null = null;
 
     // Cursor snapshots for next scan — save every 10 pages
@@ -849,11 +905,16 @@ export async function runUpdateCrawl(
       for (const feed of feeds) {
         sanitizeObject(feed);
         const fid = feed.feed_id;
+        if (!fid) continue; // guard: API 返回缺 feed_id 时跳过，避免污染集合
         allSeenFeedIds.add(fid);
         if (parallelFeedIds) parallelFeedIds.add(fid);
-        if (feed.channel_id) feedChannelMap[fid] = String(feed.channel_id);
+        // 列表接口不返回 channel_id，用 channel_name 回退（深层回复分页依赖）
+        const resolvedChId = feed.channel_id ?? channelNameToId.get(feed.channel_name);
+        if (resolvedChId) feedChannelMap[fid] = String(resolvedChId);
         const t = feed.create_time_raw;
-        if (typeof t === "number" && (oldestSeenTime === null || t < oldestSeenTime)) oldestSeenTime = t;
+        // 兼容 number/数字字符串（API 类型不稳定时删除检测不应整体失效）
+        const tNum = typeof t === "number" ? t : typeof t === "string" && /^\d+$/.test(t) ? parseInt(t, 10) : NaN;
+        if (!isNaN(tNum) && (oldestSeenTime === null || tNum < oldestSeenTime)) oldestSeenTime = tNum;
       }
 
       // Batch DB check
@@ -900,7 +961,8 @@ export async function runUpdateCrawl(
           if (feed.comment_count !== undefined && feed.comment_count !== null && existing.comment_count !== Number(feed.comment_count)) { updateData.comment_count = Number(feed.comment_count); hasChanges = true; }
           if (feed.channel_name !== undefined && feed.channel_name !== null && existing.channel_name !== feed.channel_name) { updateData.channel_name = feed.channel_name; hasChanges = true; }
           if (feed.title !== undefined && feed.title !== null && existing.title !== feed.title) { updateData.title = feed.title; hasChanges = true; }
-          if (feed.images !== undefined && feed.images !== null && JSON.stringify(feed.images) !== JSON.stringify(existing.images)) { updateData.images = feed.images; hasChanges = true; }
+          // images：结构化比较（jsonb 键序/数组顺序差异不应触发"变化"，避免全量重拉）
+          if (feed.images !== undefined && feed.images !== null && !imagesEqual(feed.images, existing.images)) { updateData.images = feed.images; hasChanges = true; }
           if (hasChanges) {
             await prisma.feed.update({ where: { feed_id: feed.feed_id }, data: updateData });
             stats.updatedFeeds++;
@@ -977,17 +1039,6 @@ export async function runUpdateCrawl(
         `Feed scan (page ${pageCount}): ${stats.newFeeds} new, ${stats.updatedFeeds} updated`
       );
 
-      // Save cursor snapshot every 10 pages for next scan's parallel workers
-      if (pageCount % 10 === 0 && page.nextCursor) {
-        thisScanCursors.push({ page: pageCount, cursor: page.nextCursor });
-      }
-
-      // Overlap detection: if parallel workers have already seen feeds on this page, they covered the rest
-      if (parallelFeedIds.size > 0 && page.feeds.some((f: any) => parallelFeedIds.has(f.feed_id))) {
-        log(taskId, `Main thread overlapped with parallel workers at page ${pageCount} — all feeds covered`);
-        break;
-      }
-
       if (!page.nextCursor) break;
       cursor = page.nextCursor;
     }
@@ -1034,6 +1085,9 @@ export async function runUpdateCrawl(
               recordPhaseCall("comments", stats.commentsProcessed ?? 0);
               if (++stats.commentsProcessed % 5 === 0) await updateTaskStats(taskId, { ...stats, phase: "comments" });
               checkAbort(signal, taskId);
+              // 记录本轮 API 真实返回的评论集合（detectDeletions 事实对比用）
+              const apiCommentIds = new Set<string>();
+              let feedCommentsComplete = true;
               try {
                 let commentCursor = "";
                 while (true) {
@@ -1042,6 +1096,7 @@ export async function runUpdateCrawl(
                   if (!commentPage.comments || commentPage.comments.length === 0) break;
 
                   for (const comment of commentPage.comments) {
+                    apiCommentIds.add(comment.comment_id);
                     try {
                       await upsertComment(comment, feedId);
                       stats.commentsAdded++;
@@ -1083,7 +1138,12 @@ export async function runUpdateCrawl(
                 }
               } catch (err) {
                 stats.errors++;
+                feedCommentsComplete = false; // 异常中断：不参与评论删除检测
                 console.error(`[Crawler] Failed comments for ${feedId}:`, err);
+              }
+              // 拉取完整（无异常）才登记集合，否则跳过删除检测避免误删
+              if (feedCommentsComplete) {
+                refetchedComments.set(feedId, apiCommentIds);
               }
             }
           })));
@@ -1112,7 +1172,7 @@ export async function runUpdateCrawl(
                   await prisma.feed.update({
                     where: { feed_id: feedId },
                     data: {
-                      content: detail.content,
+                      content: detail.content || undefined,
                       share_url: detail.share_url || undefined,
                       feed_type: detail.feed_type || undefined,
                     },
@@ -1138,7 +1198,7 @@ export async function runUpdateCrawl(
     // 更老的帖子不在本次扫描范围，不做删除判断。
     if (oldestSeenTime !== null) {
       log(taskId, `Phase 3: Deletion detection (feeds after ${new Date(oldestSeenTime * 1000).toISOString()})...`);
-      const deletions = await detectDeletions(gid, allSeenFeedIds, oldestSeenTime);
+      const deletions = await detectDeletions(gid, allSeenFeedIds, oldestSeenTime, refetchedComments);
       stats["deletions"] = deletions;
       log(taskId, `Deletions detected: ${JSON.stringify(deletions)}`);
     } else {
@@ -1149,6 +1209,8 @@ export async function runUpdateCrawl(
     await updateTaskStats(taskId, { ...stats, phase: "completed", changedFeedIds, newFeedIds });
     await updateTaskStatus(taskId, "completed");
   } catch (err) {
+    // 取消：不写 failed，直接上抛由 scheduler 标 cancelled（避免 failed→cancelled 双重写入）
+    if (err instanceof CrawlCancelledError) throw err;
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`[Crawler] Update crawl failed:`, err);
     await updateTaskStats(taskId, { ...stats, phase: "failed" });
@@ -1270,6 +1332,8 @@ export async function runMemberCrawl(
     recordPhaseEnd("members");
     log(taskId, `Member crawl completed. Stats: ${JSON.stringify(stats)}`);
   } catch (err) {
+    // 取消：不写 failed，直接上抛由 scheduler 标 cancelled（避免 failed→cancelled 双重写入）
+    if (err instanceof CrawlCancelledError) throw err;
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`[Crawler] Member crawl failed:`, err);
     await updateTaskStats(taskId, { ...stats, phase: "failed" });
@@ -1290,11 +1354,16 @@ export async function runMemberCrawl(
  *                        When provided, only feeds newer than this boundary
  *                        are checked (for incremental updates where the scan
  *                        didn't cover all feeds).
+ * @param refetchedComments Optional: feed_id → comment_id set returned by the
+ *                        API during this cycle's Phase 2. Comment deletion is
+ *                        ONLY checked against this ground truth; feeds not in
+ *                        the map are skipped entirely (their data may be stale).
  */
 export async function detectDeletions(
   guildId: string,
   seenFeedIds?: Set<string>,
-  oldestSeenTime?: number
+  oldestSeenTime?: number,
+  refetchedComments?: Map<string, Set<string>>
 ): Promise<{ feedsDeleted: number; commentsDeleted: number; membersLeft: number }> {
   let feedsDeleted = 0;
   let commentsDeleted = 0;
@@ -1326,51 +1395,28 @@ export async function detectDeletions(
     }
   }
 
-  // Detect deleted comments: comments belonging to active feeds
-  // where the comment is no longer returned by the API.
-  // We check by looking at comment_count vs actual comment records.
-  // Process in batches to avoid loading all mismatched feeds at once
-  let batchOffset = 0;
-  const BATCH_SIZE = 500;
-  while (true) {
-    const feedsWithMismatch = await prisma.$queryRaw<
-      { feed_id: string; comment_count: number; actual_count: bigint }[]
-    >`
-      SELECT f.feed_id, f.comment_count, COUNT(c.id) as actual_count
-      FROM feeds f
-      LEFT JOIN comments c ON c.feed_id = f.feed_id AND c.status = 'active'
-      WHERE f.status = 'active' AND f.comment_count > 0
-      GROUP BY f.feed_id, f.comment_count
-      HAVING COUNT(c.id) > f.comment_count
-      LIMIT ${BATCH_SIZE} OFFSET ${batchOffset}
-    `;
-
-    if (feedsWithMismatch.length === 0) break;
-
-  // For feeds where we have more comments in DB than the API reports,
-  // the excess comments may have been deleted. We mark the oldest excess ones.
-  for (const row of feedsWithMismatch) {
-    const excess = Number(row.actual_count) - row.comment_count;
-    if (excess <= 0) continue;
-
-    const excessComments = await prisma.comment.findMany({
-      where: { feed_id: row.feed_id, status: "active" },
-      orderBy: { create_time: "asc" },
-      take: excess,
-      select: { comment_id: true },
-    });
-
-    if (excessComments.length > 0) {
-      const ids = excessComments.map((c: { comment_id: string }) => c.comment_id);
-      await prisma.comment.updateMany({
-        where: { comment_id: { in: ids } },
-        data: { status: "deleted", deleted_at: new Date() },
+  // Detect deleted comments by comparing DB against the API's ACTUAL returned
+  // comment list (ground truth captured during Phase 2). A comment is only
+  // marked deleted if the API no longer returns it.
+  // NOTE: the old logic inferred deletion from count mismatches
+  // (COUNT(c.id) > feeds.comment_count) and blindly deleted the OLDEST excess
+  // comments — this destroyed real comments whenever the count was stale
+  // (verified incident 2026-08-15 01:44:30). It is intentionally removed.
+  if (refetchedComments && refetchedComments.size > 0) {
+    for (const [feedId, apiCommentIds] of refetchedComments) {
+      const dbComments = await prisma.comment.findMany({
+        where: { feed_id: feedId, status: "active" },
+        select: { comment_id: true },
       });
-      commentsDeleted += ids.length;
+      const toDelete = dbComments.filter((c: { comment_id: string }) => !apiCommentIds.has(c.comment_id));
+      if (toDelete.length > 0) {
+        await prisma.comment.updateMany({
+          where: { comment_id: { in: toDelete.map((c) => c.comment_id) } },
+          data: { status: "deleted", deleted_at: new Date() },
+        });
+        commentsDeleted += toDelete.length;
+      }
     }
-  }
-
-    batchOffset += BATCH_SIZE;
   }
 
   // Count members who have left (historical total, not just this crawl)

@@ -78,13 +78,14 @@ export async function triggerCrawl(
   adminIdentityId?: number
 ): Promise<bigint> {
   // DB-based lock: check for any running crawl (avoids Next.js bundle chunk isolation issue)
+  // 检查范围含 pending：任务创建到 running 之间的窗口期也要锁住，防 TOCTOU 并发穿透
   const existing = await prisma.crawlTask.findFirst({
-    where: { status: "running" },
-    select: { id: true, task_type: true },
+    where: { status: { in: ["pending", "running"] } },
+    select: { id: true, task_type: true, status: true },
   });
   if (existing) {
     throw new Error(
-      `无法启动 ${type} 爬取：已有 ${existing.task_type} 任务 (ID=${existing.id}) 正在运行中`
+      `无法启动 ${type} 爬取：已有 ${existing.task_type} 任务 (ID=${existing.id}, ${existing.status}) 正在运行中`
     );
   }
 
@@ -100,6 +101,19 @@ export async function triggerCrawl(
       created_at: new Date(),
     },
   });
+
+  // 原子领取：仅当仍为 pending（未被并发方抢占）时置 running。
+  // 若两个请求同时通过上面的检查，只有一个能领取成功，另一个任务被标记 cancelled。
+  const claim = await prisma.crawlTask.updateMany({
+    where: { id: task.id, status: "pending" },
+    data: { status: "running" },
+  });
+  if (claim.count !== 1) {
+    await prisma.crawlTask
+      .update({ where: { id: task.id }, data: { status: "cancelled", finished_at: new Date(), error_log: "锁竞争失败，未实际运行" } })
+      .catch(() => {});
+    throw new Error(`无法启动 ${type} 爬取：任务 ${task.id} 未获取到运行锁`);
+  }
 
   const taskId = task.id;
   console.log(`[Scheduler] Created ${type} crawl task #${taskId}`);
@@ -198,6 +212,7 @@ export async function initScheduler(): Promise<void> {
   console.log(`[Scheduler] Initializing with cron: ${currentUpdateCron} (update), ${currentMemberCron} (members)`);
 
   // Clean up zombie tasks left in "running" state from previous server lifetime
+  //（pending 也在锁范围内，create 后未领取即崩溃的任务同样回收）
   try {
     const result = await prisma.crawlTask.updateMany({
       where: { status: "running" },
@@ -205,6 +220,13 @@ export async function initScheduler(): Promise<void> {
     });
     if (result.count > 0) {
       console.log(`[Scheduler] Cleaned up ${result.count} zombie task(s) left in 'running' state`);
+    }
+    const stalePending = await prisma.crawlTask.updateMany({
+      where: { status: "pending", created_at: { lt: new Date(Date.now() - 6 * 3600 * 1000) } },
+      data: { status: "interrupted", finished_at: new Date(), error_log: "Stale pending task (crashed before claim)" },
+    });
+    if (stalePending.count > 0) {
+      console.log(`[Scheduler] Cleaned up ${stalePending.count} stale pending task(s)`);
     }
   } catch (err) {
     console.error("[Scheduler] Failed to clean up zombie tasks:", err);

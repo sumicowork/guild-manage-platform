@@ -124,9 +124,11 @@ export async function getFeedDetail(
   const detail = data.feed || data;
 
   return {
-    content: detail.content ?? "",
-    share_url: detail.share_url ?? "",
-    feed_type: detail.feed_type ?? 0,
+    // 缺失字段返回 undefined（而非 ""），调用方用 || undefined 跳过写入，
+    // 避免空串覆盖数据库中已有的真实正文
+    content: detail.content ?? undefined,
+    share_url: detail.share_url ?? undefined,
+    feed_type: detail.feed_type ?? undefined,
   };
 }
 
