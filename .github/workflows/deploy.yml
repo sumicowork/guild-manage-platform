@@ -47,11 +47,11 @@ jobs:
             tar -xzf next.tar.gz
             ls .next/standalone/server.js || echo "STANDALONE MISSING"
             rm next.tar.gz
-            # Stop PM2 app FIRST (kills parent), then kill orphaned next-server workers.
-            # Next.js spawns a separate next-server worker that outlives the PM2 parent —
-            # killing by exact cmdline pattern prevents EADDRINUSE on restart.
-            # NOTE: "[r]" regex trick prevents pkill from matching this script's own shell
-            # (the script text contains "next-server" which pkill -f would otherwise match).
+            # Stop PM2 app FIRST (kills parent), then kill orphaned worker processes.
+            # Next spawns a separate worker that outlives the PM2 parent — killing by
+            # exact cmdline pattern prevents EADDRINUSE on restart.
+            # WARNING: this script's text becomes the bash -c cmdline; any occurrence of
+            # the literal target word would make pkill -f match this shell itself.
             pm2 delete guild-platform 2>/dev/null || true
             pkill -9 -f "next-serve[r]" 2>/dev/null || true
             sleep 2
