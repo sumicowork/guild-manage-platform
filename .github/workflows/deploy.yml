@@ -42,10 +42,18 @@ jobs:
             rm -rf .next
             tar -xzf next.tar.gz
             rm next.tar.gz
-            # Kill any orphaned next-server NOT managed by PM2 (zombie prevention)
-            pkill -f "^next-server " 2>/dev/null || true
-            sleep 2
-            # Delete + recreate to ensure clean slate (avoids stale PM2 state)
+            # Stop PM2 app FIRST (kills parent), then kill orphaned next-server workers
+            # Next.js spawns a separate next-server worker that outlives the PM2 parent —
+            # killing by exact cmdline pattern prevents EADDRINUSE on restart
             pm2 delete guild-platform 2>/dev/null || true
-            pm2 start ./node_modules/.bin/next --name guild-platform -- start -p 3003
+            pkill -9 -f "next-server" 2>/dev/null || true
+            sleep 2
+            # Standalone single-process server (no worker fork → no orphans)
+            # Copy public + static assets that standalone does not bundle
+            cp -r public .next/standalone/public 2>/dev/null || true
+            mkdir -p .next/standalone/.next
+            cp -r .next/static .next/standalone/.next/static 2>/dev/null || true
+            # standalone does not auto-load .env — export it for the PM2 child
+            set -a; . ./.env 2>/dev/null || true; set +a
+            pm2 start ./.next/standalone/server.js --name guild-platform
             pm2 save
