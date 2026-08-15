@@ -1009,20 +1009,31 @@ export async function runUpdateCrawl(
     // ── Phase 2+2.5: Comments and Details in parallel ──
     // Comments use a different CLI command than details → independent rate limits → safe to run in parallel.
     if (changedFeedIds.length > 0) {
-      log(taskId, `Phase 2+2.5: Fetching comments and details for ${changedFeedIds.length} changed feeds in parallel...`);
+      // Cap per-cycle comment refetch: deep history scans can flag thousands of stale feeds.
+      // Process at most COMMENTS_BATCH_MAX per cycle; the rest are picked up in later cycles.
+      const COMMENTS_BATCH_MAX = 1000;
+      const commentsBatch = changedFeedIds.slice(0, COMMENTS_BATCH_MAX);
+      if (changedFeedIds.length > COMMENTS_BATCH_MAX) {
+        log(taskId, `Cap: ${changedFeedIds.length} changed feeds → refetching comments for first ${COMMENTS_BATCH_MAX} (rest in later cycles)`);
+      }
+      log(taskId, `Phase 2+2.5: Fetching comments for ${commentsBatch.length} feeds and details for ${changedFeedIds.length} feeds in parallel...`);
 
       await Promise.all([
-        // ── Phase 2: Fetch comments (single worker — avoid 153 on comments API) ──
+        // ── Phase 2: Fetch comments (2 parallel workers, round-robin identities handle 153) ──
         (async () => {
+          const COMMENT_WORKERS = 2;
           recordPhaseStart("comments");
-          recordPhaseTotal("comments", changedFeedIds.length);
+          recordPhaseTotal("comments", commentsBatch.length);
+          log(taskId, `Phase 2: Fetching comments with ${COMMENT_WORKERS} parallel workers...`);
 
-          let feedIdx = 0;
-          for (const feedId of changedFeedIds) {
-            feedIdx++;
-            recordPhaseCall("comments", feedIdx);
-            if (feedIdx % 5 === 0) await updateTaskStats(taskId, { ...stats, phase: "comments" });
-            checkAbort(signal, taskId);
+          const commentChunks: string[][] = Array.from({ length: COMMENT_WORKERS }, () => []);
+          commentsBatch.forEach((id, i) => commentChunks[i % COMMENT_WORKERS].push(id));
+
+          await Promise.all(commentChunks.map((chunk) => (async () => {
+            for (const feedId of chunk) {
+              recordPhaseCall("comments", stats.commentsProcessed ?? 0);
+              if (++stats.commentsProcessed % 5 === 0) await updateTaskStats(taskId, { ...stats, phase: "comments" });
+              checkAbort(signal, taskId);
               try {
                 let commentCursor = "";
                 while (true) {
@@ -1075,6 +1086,7 @@ export async function runUpdateCrawl(
                 console.error(`[Crawler] Failed comments for ${feedId}:`, err);
               }
             }
+          })));
 
           log(taskId, `Phase 2 complete: ${stats.commentsAdded} comments added`);
           recordPhaseEnd("comments");
