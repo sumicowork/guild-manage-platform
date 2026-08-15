@@ -52,10 +52,19 @@ jobs:
             # exact cmdline pattern prevents EADDRINUSE on restart.
             # WARNING: this script's text becomes the bash -c cmdline; any occurrence of
             # the literal target word would make pkill -f match this shell itself.
+            # NOTE: pm2 delete 必须在前（停掉 autorestart），否则 pkill 触发 PM2
+            # 自动重启竞态 → 新孤儿继续占端口 → EADDRINUSE 无限循环（已实测验证）
             pm2 delete guild-platform 2>/dev/null || true
             pkill -9 -f "next-serve[r]" 2>/dev/null || true
             sleep 2
-            ss -tlnp | grep 3003 || echo "PORT FREE"
+            # 端口释放确认：仍被占则按 PID 补杀（pkill 可能漏掉脱离进程树的孤儿）
+            for i in 1 2 3; do
+              ss -tlnp | grep -q ':3003' || break
+              echo "PORT 3003 STILL BUSY (attempt $i), killing..."
+              pkill -9 -f "next-serve[r]" 2>/dev/null || true
+              sleep 2
+            done
+            ss -tlnp | grep 3003 && echo "!! PORT STILL BUSY" || echo "PORT FREE"
             # Standalone single-process server (no worker fork → no orphans)
             # Copy public + static assets that standalone does not bundle
             cp -r public .next/standalone/public 2>/dev/null || true
