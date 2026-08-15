@@ -18,8 +18,24 @@ const DEFAULT_CRON = "0 */6 * * *";
 /** Member crawl cron: daily at 3 AM */
 const MEMBER_CRON = "0 3 * * *";
 
+/**
+ * 配置文件路径：standalone 部署时 server.js 执行 process.chdir(__dirname)
+ * （cwd = .next/standalone），必须回退到项目根才能读到真实配置。
+ * 探测顺序：cwd（本地开发）→ cwd 上两级（standalone 部署）。
+ */
+function resolveConfigFile(): string {
+  const candidates = [
+    path.join(process.cwd(), ".crawl_config.json"),
+    path.join(process.cwd(), "..", "..", ".crawl_config.json"),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return candidates[0];
+}
+
 /** File to persist cron settings across restarts */
-const CONFIG_FILE = path.join(process.cwd(), ".crawl_config.json");
+const CONFIG_FILE = resolveConfigFile();
 
 function readPersistedCron(): { update?: string; member?: string } {
   try {
