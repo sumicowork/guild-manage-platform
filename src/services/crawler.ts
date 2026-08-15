@@ -794,15 +794,24 @@ export async function runFullCrawl(
  * - Full-depth scan (no page cap or early termination) — stops only when API cursor ends.
  * - Fetches comments and details for changed feeds in parallel.
  * - Runs deletion detection after completion.
+ *
+ * @param options.mode "light"：只扫最新几页（默认 3），不启用 cursor workers，评论补拉上限小 —
+ *   任务 20-30 秒完成，支持每分钟触发；"deep"（默认）：全深度 + workers + 大评论上限 — 深夜补欠账。
  */
 export async function runUpdateCrawl(
   guildId: string,
   taskId: bigint,
   adminIdentityId?: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: { mode?: "light" | "deep" }
 ): Promise<void> {
   const gid = guildId || GUILD_ID;
-  log(taskId, `Starting update crawl for guild ${gid}`);
+  const mode = options?.mode ?? "deep";
+  const LIGHT_MAX_PAGES = 3; // 轻量模式：只扫最新 3 页（约 3000 条）
+  const LIGHT_COMMENTS_MAX = 200; // 轻量模式：单轮评论补拉上限
+  const DEEP_COMMENTS_MAX = 5000; // 全量模式：深夜补欠账可处理更多
+  const commentsBatchMax = mode === "light" ? LIGHT_COMMENTS_MAX : DEEP_COMMENTS_MAX;
+  log(taskId, `Starting ${mode} update crawl for guild ${gid}`);
 
   await prisma.crawlTask.update({
     where: { id: taskId },
@@ -816,6 +825,7 @@ export async function runUpdateCrawl(
     commentsProcessed: 0,
     errors: 0,
     autoActions: 0,
+    mode,
     timing: {} as Record<string, any>,
   };
 
@@ -972,13 +982,13 @@ export async function runUpdateCrawl(
       }
     }
 
-    // ── Parallel workers from cached cursors ──
+    // ── Parallel workers from cached cursors（light 模式不启用：只保证实时性）──
     // Use ALL saved cursors: each worker scans from its cursor until it hits territory
     // already covered by another worker or the main thread. With 4+ cursors and
     // 8-10 identities, each covers ~10 pages — achieving near-linear speedup.
     const parallelFeedIds = new Set<string>();
     const workerPromises: Promise<void>[] = [];
-    if (savedCursors.length > 0) {
+    if (savedCursors.length > 0 && mode !== "light") {
       for (const entry of savedCursors) {
         workerPromises.push((async () => {
           log(taskId, `[CursorWorker p${entry.page}] Starting from cached cursor...`);
@@ -1013,6 +1023,11 @@ export async function runUpdateCrawl(
     // ── Main scan loop (newest feeds → older) ──
     while (true) {
       checkAbort(signal, taskId);
+      // light 模式页数上限：只扫最新几页，保证任务在 1 分钟内完成
+      if (mode === "light" && pageCount >= LIGHT_MAX_PAGES) {
+        log(taskId, `[light] Page cap ${LIGHT_MAX_PAGES} reached — stopping scan`);
+        break;
+      }
       pageCount++;
       recordPhaseCall("scan", pageCount);
       recordPhaseTotal("scan", pageCount);
@@ -1061,8 +1076,8 @@ export async function runUpdateCrawl(
     // Comments use a different CLI command than details → independent rate limits → safe to run in parallel.
     if (changedFeedIds.length > 0) {
       // Cap per-cycle comment refetch: deep history scans can flag thousands of stale feeds.
-      // Process at most COMMENTS_BATCH_MAX per cycle; the rest are picked up in later cycles.
-      const COMMENTS_BATCH_MAX = 1000;
+      // Process at most commentsBatchMax per cycle; the rest are picked up in later cycles.
+      const COMMENTS_BATCH_MAX = commentsBatchMax;
       const commentsBatch = changedFeedIds.slice(0, COMMENTS_BATCH_MAX);
       if (changedFeedIds.length > COMMENTS_BATCH_MAX) {
         log(taskId, `Cap: ${changedFeedIds.length} changed feeds → refetching comments for first ${COMMENTS_BATCH_MAX} (rest in later cycles)`);

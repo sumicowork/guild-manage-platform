@@ -13,10 +13,13 @@ import path from "path";
 // ─── Configuration ────────────────────────────────────────────────────
 
 /** Default cron expression: every 6 hours */
-const DEFAULT_CRON = "0 */6 * * *";
+const DEFAULT_CRON = "* * * * *";
 
 /** Member crawl cron: daily at 3 AM */
-const MEMBER_CRON = "0 3 * * *";
+const MEMBER_CRON = "*/10 * * * *";
+
+/** 深夜全量（deep）爬取：每天 3:30，清历史欠账 */
+const DEFAULT_DEEP_CRON = "30 3 * * *";
 
 /**
  * 配置文件路径：standalone 部署时 server.js 执行 process.chdir(__dirname)
@@ -37,7 +40,7 @@ function resolveConfigFile(): string {
 /** File to persist cron settings across restarts */
 const CONFIG_FILE = resolveConfigFile();
 
-function readPersistedCron(): { update?: string; member?: string } {
+function readPersistedCron(): { update?: string; member?: string; update_deep?: string } {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
       return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
@@ -46,11 +49,12 @@ function readPersistedCron(): { update?: string; member?: string } {
   return {};
 }
 
-function writePersistedCron(update?: string, member?: string): void {
+function writePersistedCron(update?: string, member?: string, updateDeep?: string): void {
   try {
     const existing = readPersistedCron();
     if (update !== undefined) existing.update = update;
     if (member !== undefined) existing.member = member;
+    if (updateDeep !== undefined) existing.update_deep = updateDeep;
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(existing), "utf-8");
   } catch { /* ignore */ }
 }
@@ -60,10 +64,12 @@ function writePersistedCron(update?: string, member?: string): void {
 // Priority: env var > persisted file > default
 const persisted = readPersistedCron();
 let updateTask: ScheduledTask | null = null;
+let updateDeepTask: ScheduledTask | null = null;
 let memberTask: ScheduledTask | null = null;
 let identityCheckTask: ScheduledTask | null = null;
 let currentUpdateCron = process.env.CRAWL_CRON || persisted.update || DEFAULT_CRON;
 let currentMemberCron = process.env.MEMBER_CRON || persisted.member || MEMBER_CRON;
+let currentUpdateDeepCron = process.env.CRAWL_DEEP_CRON || persisted.update_deep || DEFAULT_DEEP_CRON;
 
 /** Tracks running tasks for frontend display (real lock is DB-based in triggerCrawl) */
 const runningTasks: Record<string, boolean> = {
@@ -85,13 +91,15 @@ const _abortControllers: Map<string, AbortController> = new Map();
  * @param triggeredBy  'manual' or 'cron'
  * @param userId       Optional platform user ID who triggered it
  * @param adminIdentityId  Optional admin identity ID for CLI credential switching
+ * @param mode         update 任务模式："light"（每分钟，扫最新几页）| "deep"（深夜全量补欠账）
  * @returns The created task's BigInt ID
  */
 export async function triggerCrawl(
   type: "full" | "update" | "members",
   triggeredBy: "manual" | "cron",
   userId?: number,
-  adminIdentityId?: number
+  adminIdentityId?: number,
+  mode?: "light" | "deep"
 ): Promise<bigint> {
   // DB-based lock: check for any running crawl (avoids Next.js bundle chunk isolation issue)
   // 检查范围含 pending：任务创建到 running 之间的窗口期也要锁住，防 TOCTOU 并发穿透
@@ -148,7 +156,7 @@ export async function triggerCrawl(
           await runFullCrawl(guildId, taskId, adminIdentityId, controller.signal);
           break;
         case "update":
-          await runUpdateCrawl(guildId, taskId, adminIdentityId, controller.signal);
+          await runUpdateCrawl(guildId, taskId, adminIdentityId, controller.signal, { mode });
           break;
         case "members":
           await runMemberCrawl(guildId, taskId, adminIdentityId, controller.signal);
@@ -251,19 +259,34 @@ export async function initScheduler(): Promise<void> {
   // Clean up any existing scheduled tasks
   destroyScheduler();
 
-  // Schedule update crawl
+  // Schedule update crawl（light 模式：每分钟轻量扫描，保证实时性）
   if (cron.validate(currentUpdateCron)) {
     updateTask = cron.schedule(currentUpdateCron, async () => {
-      console.log(`[Scheduler] Cron triggered: update crawl`);
+      console.log(`[Scheduler] Cron triggered: update crawl (light)`);
       try {
-        await triggerCrawl("update", "cron");
+        await triggerCrawl("update", "cron", undefined, undefined, "light");
       } catch (err) {
         console.error("[Scheduler] Failed to trigger update crawl:", err);
       }
     });
-    console.log(`[Scheduler] Update crawl scheduled: ${currentUpdateCron}`);
+    console.log(`[Scheduler] Update crawl (light) scheduled: ${currentUpdateCron}`);
   } else {
     console.warn(`[Scheduler] Invalid update cron expression: ${currentUpdateCron}`);
+  }
+
+  // Schedule deep update crawl（每天凌晨全量深扫，清历史欠账）
+  if (cron.validate(currentUpdateDeepCron)) {
+    updateDeepTask = cron.schedule(currentUpdateDeepCron, async () => {
+      console.log(`[Scheduler] Cron triggered: update crawl (deep)`);
+      try {
+        await triggerCrawl("update", "cron", undefined, undefined, "deep");
+      } catch (err) {
+        console.error("[Scheduler] Failed to trigger deep update crawl:", err);
+      }
+    });
+    console.log(`[Scheduler] Update crawl (deep) scheduled: ${currentUpdateDeepCron}`);
+  } else {
+    console.warn(`[Scheduler] Invalid deep update cron expression: ${currentUpdateDeepCron}`);
   }
 
   // Schedule member crawl
@@ -300,6 +323,10 @@ export function destroyScheduler(): void {
     updateTask.stop();
     updateTask = null;
   }
+  if (updateDeepTask) {
+    updateDeepTask.stop();
+    updateDeepTask = null;
+  }
   if (memberTask) {
     memberTask.stop();
     memberTask = null;
@@ -335,9 +362,9 @@ export function updateCrawlSchedule(cronExpr: string): void {
   }
 
   updateTask = cron.schedule(currentUpdateCron, async () => {
-    console.log(`[Scheduler] Cron triggered: update crawl`);
+    console.log(`[Scheduler] Cron triggered: update crawl (light)`);
     try {
-      await triggerCrawl("update", "cron");
+      await triggerCrawl("update", "cron", undefined, undefined, "light");
     } catch (err) {
       console.error("[Scheduler] Failed to trigger update crawl:", err);
     }
