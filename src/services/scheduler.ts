@@ -101,15 +101,31 @@ export async function triggerCrawl(
   adminIdentityId?: number,
   mode?: "light" | "deep"
 ): Promise<bigint> {
-  // DB-based lock: check for any running crawl (avoids Next.js bundle chunk isolation issue)
-  // 检查范围含 pending：任务创建到 running 之间的窗口期也要锁住，防 TOCTOU 并发穿透
+  // DB-based lock: 按类型/模式互斥（avoids Next.js bundle chunk isolation issue）
+  // 冲突矩阵（existing 正在运行 → 是否阻止 incoming 启动）：
+  //   · full          阻止一切（含自身）
+  //   · incoming=full 被任何 running 阻止
+  //   · deep          仅与 full / deep 互斥（不与 light / members 互斥）
+  //   · light/members 仅被 full 阻止（彼此、以及 deep 均不互斥 → 3:30 deep 与 light 可并发）
+  // 关键修复：旧逻辑「有任何 running 就拒绝」导致 3:30 的 deep 被同分钟的
+  //           light/members 抢锁饿死（实测每天失败）。现 deep 不再被 light/members 挡。
+  // 注意：update 任务靠 mode 区分 light/deep；历史任务 mode 为 NULL（旧代码未记录），
+  //       视为非 deep，不会误挡新 deep（保证 3:30 deep 能跑起来）。
+  const conflictWhere: any = { status: { in: ["pending", "running"] } };
+  if (type !== "full") {
+    const incomingIsDeep = type === "update" && mode === "deep";
+    conflictWhere.OR = [
+      { task_type: "full" },
+      ...(incomingIsDeep ? [{ task_type: "update", mode: "deep" }] : []),
+    ];
+  }
   const existing = await prisma.crawlTask.findFirst({
-    where: { status: { in: ["pending", "running"] } },
-    select: { id: true, task_type: true, status: true },
+    where: conflictWhere,
+    select: { id: true, task_type: true, status: true, mode: true },
   });
   if (existing) {
     throw new Error(
-      `无法启动 ${type} 爬取：已有 ${existing.task_type} 任务 (ID=${existing.id}, ${existing.status}) 正在运行中`
+      `无法启动 ${type}${mode ? `(${mode})` : ""} 爬取：已有冲突任务 ${existing.task_type}${existing.mode ? `(${existing.mode})` : ""} (ID=${existing.id}, ${existing.status}) 正在运行中`
     );
   }
 
@@ -119,6 +135,7 @@ export async function triggerCrawl(
   const task = await prisma.crawlTask.create({
     data: {
       task_type: type,
+      mode: mode ?? null,
       status: "pending",
       triggered_by: triggeredBy,
       triggered_by_user: userId ? BigInt(userId) : null,

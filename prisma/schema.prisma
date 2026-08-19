@@ -258,6 +258,7 @@ model CrawlTask {
   finished_at       DateTime?
   stats             Json?
   error_log         String?
+  mode              String?   // light | deep（仅 update 任务记录；full/members 为 null）
   created_at        DateTime  @default(now())
 
   @@index([status])

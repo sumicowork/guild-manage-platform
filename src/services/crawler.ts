@@ -901,6 +901,8 @@ export async function runUpdateCrawl(
     const feedChannelMap: Record<string, string> = {};
     // feed_id → API 本轮实际返回的 comment_id 集合（detectDeletions 事实对比用）
     const refetchedComments = new Map<string, Set<string>>();
+    // comment_id → API 本轮实际返回的 reply_id 集合（回复删除检测用，此前 detectDeletions 从不清理 reply → 造成泄漏）
+    const refetchedReplies = new Map<string, Set<string>>();
     let oldestSeenTime: number | null = null;
 
     // Cursor snapshots for next scan — save every 10 pages
@@ -1067,9 +1069,72 @@ export async function runUpdateCrawl(
     // Save cursor snapshots for next scan
     stats.cursors = thisScanCursors;
 
+    // ── 评论对账闸门升级：计数不一致（含回复）的帖也进入评论补拉 ──
+    // 触发条件：(活跃评论数 + 活跃回复数) != 接口声明 comment_count
+    // 双向 ID-diff：API 有 DB 无 → 补拉（<，评论归零主因）；DB 有 API 无 → 删除（>，回复删除泄漏）
+    // 旧逻辑只在 comment_count 字段"变化"时才拉评论，导致字段已同步但实际缺评论的孤儿帖永不补拉。
+    const commentFeedIds = new Set<string>(changedFeedIds);
+    try {
+      const seenIds = [...allSeenFeedIds];
+      if (seenIds.length > 0) {
+        const cmtGroups = await prisma.comment.groupBy({
+          by: ["feed_id"],
+          where: { feed_id: { in: seenIds }, status: "active" },
+          _count: { _all: true },
+        });
+        const cmtByFeed = new Map<string, number>();
+        for (const g of cmtGroups) cmtByFeed.set(g.feed_id, g._count._all);
+
+        // 回复经 comment_id → feed_id 映射后按帖聚合
+        const seenComments = await prisma.comment.findMany({
+          where: { feed_id: { in: seenIds } },
+          select: { comment_id: true, feed_id: true },
+        });
+        const commentIdToFeed = new Map<string, string>();
+        const commentIdList: string[] = [];
+        for (const c of seenComments) {
+          commentIdToFeed.set(c.comment_id, c.feed_id);
+          commentIdList.push(c.comment_id);
+        }
+        const repGroups =
+          commentIdList.length > 0
+            ? await prisma.reply.groupBy({
+                by: ["comment_id"],
+                where: { comment_id: { in: commentIdList }, status: "active" },
+                _count: { _all: true },
+              })
+            : [];
+        const repByFeed = new Map<string, number>();
+        for (const g of repGroups) {
+          const fid = commentIdToFeed.get(g.comment_id);
+          if (fid) repByFeed.set(fid, (repByFeed.get(fid) ?? 0) + g._count._all);
+        }
+
+        // 这些 feed 的 DB 声明 comment_count（含 null，按 0 处理）
+        const feedsWithCount = await prisma.feed.findMany({
+          where: { feed_id: { in: seenIds } },
+          select: { feed_id: true, comment_count: true },
+        });
+        let mismatchCount = 0;
+        for (const f of feedsWithCount) {
+          const declared = f.comment_count ?? 0;
+          const actual = (cmtByFeed.get(f.feed_id) ?? 0) + (repByFeed.get(f.feed_id) ?? 0);
+          if (actual !== declared) {
+            commentFeedIds.add(f.feed_id);
+            mismatchCount++;
+          }
+        }
+        stats.reconcileFeeds = mismatchCount;
+        log(taskId, `Comment reconcile gate: +${mismatchCount} feeds (count mismatch) added to comment fetch set (total ${commentFeedIds.size})`);
+      }
+    } catch (err) {
+      console.error(`[Crawler] Failed comment-reconcile gate:`, err);
+      stats.errors++;
+    }
+
     log(
       taskId,
-      `Phase 1 complete: ${stats.newFeeds} new feeds, ${stats.updatedFeeds} changed. Fetching comments for ${changedFeedIds.length} feeds.`
+      `Phase 1 complete: ${stats.newFeeds} new feeds, ${stats.updatedFeeds} changed. Fetching comments for ${commentFeedIds.size} feeds.`
     );
     recordPhaseEnd("scan");
     // ── Phase 2+2.5: Comments and Details in parallel ──
@@ -1078,9 +1143,9 @@ export async function runUpdateCrawl(
       // Cap per-cycle comment refetch: deep history scans can flag thousands of stale feeds.
       // Process at most commentsBatchMax per cycle; the rest are picked up in later cycles.
       const COMMENTS_BATCH_MAX = commentsBatchMax;
-      const commentsBatch = changedFeedIds.slice(0, COMMENTS_BATCH_MAX);
-      if (changedFeedIds.length > COMMENTS_BATCH_MAX) {
-        log(taskId, `Cap: ${changedFeedIds.length} changed feeds → refetching comments for first ${COMMENTS_BATCH_MAX} (rest in later cycles)`);
+      const commentsBatch = [...commentFeedIds].slice(0, COMMENTS_BATCH_MAX);
+      if (commentFeedIds.size > COMMENTS_BATCH_MAX) {
+        log(taskId, `Cap: ${commentFeedIds.size} feeds need comment reconcile → refetching first ${COMMENTS_BATCH_MAX} (rest in later cycles)`);
       }
       log(taskId, `Phase 2+2.5: Fetching comments for ${commentsBatch.length} feeds and details for ${changedFeedIds.length} feeds in parallel...`);
 
@@ -1100,8 +1165,9 @@ export async function runUpdateCrawl(
               recordPhaseCall("comments", stats.commentsProcessed ?? 0);
               if (++stats.commentsProcessed % 5 === 0) await updateTaskStats(taskId, { ...stats, phase: "comments" });
               checkAbort(signal, taskId);
-              // 记录本轮 API 真实返回的评论集合（detectDeletions 事实对比用）
+              // 记录本轮 API 真实返回的评论/回复集合（detectDeletions 事实对比用）
               const apiCommentIds = new Set<string>();
+              const feedReplyIds = new Map<string, Set<string>>();
               let feedCommentsComplete = true;
               try {
                 let commentCursor = "";
@@ -1112,6 +1178,7 @@ export async function runUpdateCrawl(
 
                   for (const comment of commentPage.comments) {
                     apiCommentIds.add(comment.comment_id);
+                    const replyIds = new Set<string>();
                     try {
                       await upsertComment(comment, feedId);
                       stats.commentsAdded++;
@@ -1120,6 +1187,7 @@ export async function runUpdateCrawl(
                         for (const reply of comment.replies_preview) {
                           try {
                             await upsertReply(reply, comment.comment_id, feedId);
+                            replyIds.add(reply.reply_id);
                           } catch {
                             stats.errors++;
                           }
@@ -1137,12 +1205,14 @@ export async function runUpdateCrawl(
                             channelId,
                             async (reply) => {
                               await upsertReply(reply, comment.comment_id, feedId);
+                              replyIds.add(reply.reply_id);
                               stats.commentsAdded++;
                             },
                             adminIdentityId
                           );
                         }
                       }
+                      feedReplyIds.set(comment.comment_id, replyIds);
                     } catch {
                       stats.errors++;
                     }
@@ -1153,12 +1223,22 @@ export async function runUpdateCrawl(
                 }
               } catch (err) {
                 stats.errors++;
-                feedCommentsComplete = false; // 异常中断：不参与评论删除检测
+                feedCommentsComplete = false; // 异常中断：不参与评论/回复删除检测
                 console.error(`[Crawler] Failed comments for ${feedId}:`, err);
               }
               // 拉取完整（无异常）才登记集合，否则跳过删除检测避免误删
               if (feedCommentsComplete) {
                 refetchedComments.set(feedId, apiCommentIds);
+                for (const [cid, rids] of feedReplyIds) refetchedReplies.set(cid, rids);
+                // 用实际拉回的(评论+回复)数回写 comment_count，使声明数与实际一致，
+                // 既能修正 API 列表 comment_count 偶发偏大，也避免该帖每轮被反复重拉。
+                const actualCount = apiCommentIds.size + [...feedReplyIds.values()].reduce((a, s) => a + s.size, 0);
+                try {
+                  const cur = await prisma.feed.findUnique({ where: { feed_id: feedId }, select: { comment_count: true } });
+                  if ((cur?.comment_count ?? null) !== actualCount) {
+                    await prisma.feed.update({ where: { feed_id: feedId }, data: { comment_count: actualCount } });
+                  }
+                } catch { /* best-effort */ }
               }
             }
           })));
@@ -1213,7 +1293,7 @@ export async function runUpdateCrawl(
     // 更老的帖子不在本次扫描范围，不做删除判断。
     if (oldestSeenTime !== null) {
       log(taskId, `Phase 3: Deletion detection (feeds after ${new Date(oldestSeenTime * 1000).toISOString()})...`);
-      const deletions = await detectDeletions(gid, allSeenFeedIds, oldestSeenTime, refetchedComments);
+      const deletions = await detectDeletions(gid, allSeenFeedIds, oldestSeenTime, refetchedComments, refetchedReplies);
       stats["deletions"] = deletions;
       log(taskId, `Deletions detected: ${JSON.stringify(deletions)}`);
     } else {
@@ -1373,12 +1453,17 @@ export async function runMemberCrawl(
  *                        API during this cycle's Phase 2. Comment deletion is
  *                        ONLY checked against this ground truth; feeds not in
  *                        the map are skipped entirely (their data may be stale).
+ * @param refetchedReplies  Optional: comment_id → reply_id set returned by the
+ *                        API during Phase 2 (replies_preview + 分页). 回复删除
+ *                        同样只以该事实集合为准；此前 detectDeletions 从不处理
+ *                        reply 表，导致平台已删的回复永久残留（泄漏）。
  */
 export async function detectDeletions(
   guildId: string,
   seenFeedIds?: Set<string>,
   oldestSeenTime?: number,
-  refetchedComments?: Map<string, Set<string>>
+  refetchedComments?: Map<string, Set<string>>,
+  refetchedReplies?: Map<string, Set<string>>
 ): Promise<{ feedsDeleted: number; commentsDeleted: number; membersLeft: number }> {
   let feedsDeleted = 0;
   let commentsDeleted = 0;
@@ -1427,6 +1512,28 @@ export async function detectDeletions(
       if (toDelete.length > 0) {
         await prisma.comment.updateMany({
           where: { comment_id: { in: toDelete.map((c) => c.comment_id) } },
+          data: { status: "deleted", deleted_at: new Date() },
+        });
+        commentsDeleted += toDelete.length;
+      }
+    }
+  }
+
+  // Detect deleted replies by comparing DB against the API's ACTUAL returned
+  // reply list (ground truth captured during Phase 2). A reply is only marked
+  // deleted if the API no longer returns it. 此前 detectDeletions 完全不处理
+  // reply 表 → 平台已删的回复永久留在 DB，造成 dbReal(评论+回复) > comment_count
+  // 的泄漏（实测 152 帖 / 247 条）。现与评论一样做事实对比删除。
+  if (refetchedReplies && refetchedReplies.size > 0) {
+    for (const [commentId, apiReplyIds] of refetchedReplies) {
+      const dbReplies = await prisma.reply.findMany({
+        where: { comment_id: commentId, status: "active" },
+        select: { reply_id: true },
+      });
+      const toDelete = dbReplies.filter((r: { reply_id: string }) => !apiReplyIds.has(r.reply_id));
+      if (toDelete.length > 0) {
+        await prisma.reply.updateMany({
+          where: { reply_id: { in: toDelete.map((r) => r.reply_id) } },
           data: { status: "deleted", deleted_at: new Date() },
         });
         commentsDeleted += toDelete.length;
