@@ -1139,7 +1139,8 @@ export async function runUpdateCrawl(
     recordPhaseEnd("scan");
     // ── Phase 2+2.5: Comments and Details in parallel ──
     // Comments use a different CLI command than details → independent rate limits → safe to run in parallel.
-    if (changedFeedIds.length > 0) {
+    // 关键：评论入口以 commentFeedIds（旧 changed + 对账 reconcile）为准，不再只看 changedFeedIds
+    if (commentFeedIds.size > 0) {
       // Cap per-cycle comment refetch: deep history scans can flag thousands of stale feeds.
       // Process at most commentsBatchMax per cycle; the rest are picked up in later cycles.
       const COMMENTS_BATCH_MAX = commentsBatchMax;
