@@ -1242,7 +1242,7 @@ export async function runUpdateCrawl(
                 } catch { /* best-effort */ }
               }
             }
-          })));
+          })()));
 
           log(taskId, `Phase 2 complete: ${stats.commentsAdded} comments added`);
           recordPhaseEnd("comments");
@@ -1280,7 +1280,7 @@ export async function runUpdateCrawl(
                 console.error(`[Crawl] Failed to fetch detail for ${feedId}:`, err);
               }
             }
-          })));
+          })()));
 
           await updateTaskStats(taskId, { ...stats, phase: "details" });
           recordPhaseEnd("details");
