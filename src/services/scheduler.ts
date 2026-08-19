@@ -114,10 +114,20 @@ export async function triggerCrawl(
   const conflictWhere: any = { status: { in: ["pending", "running"] } };
   if (type !== "full") {
     const incomingIsDeep = type === "update" && mode === "deep";
-    conflictWhere.OR = [
-      { task_type: "full" },
-      ...(incomingIsDeep ? [{ task_type: "update", mode: "deep" }] : []),
-    ];
+    const incomingIsLight = type === "update" && mode === "light";
+    if (incomingIsLight) {
+      // light 仅被 full/deep 挡；但自身也要互斥（上一轮 light 未结束时不再并发新 light）
+      conflictWhere.OR = [
+        { task_type: "full" },
+        { task_type: "update", mode: "deep" },
+        { task_type: "update", mode: "light" },
+      ];
+    } else {
+      conflictWhere.OR = [
+        { task_type: "full" },
+        ...(incomingIsDeep ? [{ task_type: "update", mode: "deep" }] : []),
+      ];
+    }
   }
   const existing = await prisma.crawlTask.findFirst({
     where: conflictWhere,
