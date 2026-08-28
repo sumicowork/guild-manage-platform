@@ -102,17 +102,19 @@ export async function GET(req: NextRequest) {
       // Top 发帖评论：按 发帖数+评论数 合计排名（近30天）
       pool
         .query(
-          `SELECT author_id,
-            COUNT(*) FILTER (WHERE source = 'feed')::int as posts,
-            COUNT(*) FILTER (WHERE source = 'comment')::int as comments
-          FROM (
-            SELECT author_id, 'feed' as source FROM feeds
-              WHERE create_time >= $1 AND author_id IS NOT NULL AND author_id <> ''
-            UNION ALL
-            SELECT author_id, 'comment' as source FROM comments
-              WHERE create_time >= $1 AND author_id IS NOT NULL AND author_id <> ''
-          ) u
-          GROUP BY author_id
+          `SELECT author_id, posts, comments FROM (
+            SELECT author_id,
+              COUNT(*) FILTER (WHERE source = 'feed')::int as posts,
+              COUNT(*) FILTER (WHERE source = 'comment')::int as comments
+            FROM (
+              SELECT author_id, 'feed' as source FROM feeds
+                WHERE create_time >= $1 AND author_id IS NOT NULL AND author_id <> ''
+              UNION ALL
+              SELECT author_id, 'comment' as source FROM comments
+                WHERE create_time >= $1 AND author_id IS NOT NULL AND author_id <> ''
+            ) u
+            GROUP BY author_id
+          ) g
           ORDER BY posts + comments DESC
           LIMIT 10`,
           [monthAgoStr]
