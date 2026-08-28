@@ -12,7 +12,7 @@ interface Stats {
   content: { totalFeeds: number; feedsToday: number; feedsThisWeek: number; totalComments: number; commentsToday: number; commentsThisWeek: number };
   dailyTrend: Array<{ date: string; feeds: number; comments: number; authors: number }>;
   hourlyActivity: Array<{ hour: number; feeds: number; comments: number }>;
-  topAuthors: Array<{ tinyid: string; nickname: string; postCount: number }>;
+  topAuthors: Array<{ tinyid: string; nickname: string; postCount: number; commentCount: number }>;
 }
 
 function fmtNum(n: number): string {
@@ -236,7 +236,7 @@ export default function StatisticsPage() {
 
         <Card className="border-gray-100">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Top 发帖（近30天）</CardTitle>
+            <CardTitle className="text-sm">Top 发帖评论（近30天）</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
@@ -244,7 +244,10 @@ export default function StatisticsPage() {
                 <div key={a.tinyid} className="flex items-center gap-2 text-sm">
                   <span className="w-5 text-center text-xs font-mono text-gray-400">{i + 1}</span>
                   <span className="flex-1 text-gray-700 truncate">{a.nickname}</span>
-                  <span className="text-xs text-gray-500 font-mono">{a.postCount}帖</span>
+                  <span className="text-xs text-gray-500 font-mono">
+                    {a.postCount}帖 · {a.commentCount}评
+                    <span className="text-gray-900 font-medium ml-1.5">{a.postCount + a.commentCount}</span>
+                  </span>
                 </div>
               ))}
             </div>

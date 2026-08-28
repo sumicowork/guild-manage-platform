@@ -99,13 +99,26 @@ export async function GET(req: NextRequest) {
       prisma.comment.count(),
       prisma.comment.count({ where: { create_time: { gte: today } } }),
       prisma.comment.count({ where: { create_time: { gte: weekAgo } } }),
-      prisma.feed.groupBy({
-        by: ["author_id"],
-        where: { create_time: { gte: monthAgo } },
-        _count: { author_id: true },
-        orderBy: { _count: { author_id: "desc" } },
-        take: 10,
-      }),
+      // Top 发帖评论：按 发帖数+评论数 合计排名（近30天）
+      pool
+        .query(
+          `SELECT author_id,
+            COUNT(*) FILTER (WHERE source = 'feed')::int as posts,
+            COUNT(*) FILTER (WHERE source = 'comment')::int as comments
+          FROM (
+            SELECT author_id, 'feed' as source FROM feeds
+              WHERE create_time >= $1 AND author_id IS NOT NULL AND author_id <> ''
+            UNION ALL
+            SELECT author_id, 'comment' as source FROM comments
+              WHERE create_time >= $1 AND author_id IS NOT NULL AND author_id <> ''
+          ) u
+          GROUP BY author_id
+          ORDER BY posts + comments DESC
+          LIMIT 10`,
+          [monthAgoStr]
+        )
+        .then((r) => r.rows)
+        .catch((e) => { console.error(e); return []; }),
       dailyTrendQuery.then(r => r.rows).catch(e => { console.error(e); return []; }),
       hourlyActivityQuery.then(r => r.rows).catch(e => { console.error(e); return []; }),
     ]);
@@ -135,10 +148,11 @@ export async function GET(req: NextRequest) {
       content: { totalFeeds, feedsToday, feedsThisWeek: feedsWeek, totalComments, commentsToday, commentsThisWeek: commentsWeek },
       dailyTrend,
       hourlyActivity,
-      topAuthors: topAuthors.map((a) => ({
+      topAuthors: (topAuthors as any[]).map((a) => ({
         tinyid: a.author_id || '',
         nickname: nicknameMap.get(a.author_id || '') || (a.author_id || ''),
-        postCount: a._count.author_id,
+        postCount: Number(a.posts) || 0,
+        commentCount: Number(a.comments) || 0,
       })),
     });
   } catch (err) {
