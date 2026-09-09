@@ -166,10 +166,10 @@ function ReplyItem({
             )}
           </span>
         </div>
-        <p className={`mt-1 text-sm whitespace-pre-wrap ${reply.status === 'deleted' ? 'text-gray-400 italic' : 'text-gray-700'}`}>
-          {reply.status === 'deleted' ? '(此评论已被删除)' : reply.content}
+        <p className={`mt-1 text-sm whitespace-pre-wrap ${reply.status === 'deleted' ? 'text-gray-500' : 'text-gray-700'}`}>
+          {reply.content}
         </p>
-        {reply.status !== 'deleted' && reply.contentImages && reply.contentImages.length > 0 && (
+        {reply.contentImages && reply.contentImages.length > 0 && (
           <div className="mt-2 flex gap-1.5 flex-wrap">
             {reply.contentImages.map((img, i) => (
               <ImgWithPreview
@@ -213,10 +213,10 @@ function CommentItem({
           )}
         </span>
       </div>
-      <p className={`mt-1.5 text-sm whitespace-pre-wrap ${comment.status === 'deleted' ? 'text-gray-400 italic' : 'text-gray-700'}`}>
-        {comment.status === 'deleted' ? '(此评论已被删除)' : comment.content}
+      <p className={`mt-1.5 text-sm whitespace-pre-wrap ${comment.status === 'deleted' ? 'text-gray-500' : 'text-gray-700'}`}>
+        {comment.content}
       </p>
-      {comment.status !== 'deleted' && comment.contentImages && comment.contentImages.length > 0 && (
+      {comment.contentImages && comment.contentImages.length > 0 && (
         <div className="mt-2 flex gap-1.5 flex-wrap">
           {comment.contentImages.map((img, i) => (
             <ImgWithPreview
